@@ -181,7 +181,7 @@ useEffect(() => {
                 />
               </div>
 
-              <div className="hidden lg:flex gap-6 items-center">
+              <div className=" lg:flex gap-6 items-center">
                 <div onClick={user ? () => setCurrentPage('cart') : () => setIsLoginModalOpen(true)} className="relative cursor-pointer rounded-lg bg-white/20 px-3 py-2 hover:bg-white/30 transition-colors">
                   Giỏ hàng
                   <span className="absolute -top-2 -right-2 bg-yellow-400 text-red-600 text-[10px] font-bold px-1.5 rounded-full">{cartItems.length}</span>
