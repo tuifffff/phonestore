@@ -8,6 +8,7 @@ import CheckoutPage from './components/CheckoutPage';
 import AdminDashboard from './components/AdminDashboard';
 import ProfilePage from './components/ProfilePage';
 import OrderHistoryPage from './components/OrderHistoryPage';
+import OrderDetailPage from './components/OrderDetailPage';
 const parsePrice = (priceStr) => Number(priceStr.replace(/[^0-9]/g, ''));
 // --- TÁCH COMPONENT RA NGOÀI ĐỂ TRÁNH RE-RENDER ---
 const RegisterPage = ({ onBack, onNavigateToLogin }) => (
@@ -37,6 +38,7 @@ function App() {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState('home');
   const [user, setUser] = useState(null);
+  const [selectedOrder, setSelectedOrder] = useState(null);
   
   const [checkoutMode, setCheckoutMode] = useState("checkout");
   // --- TRONG HÀM App() ---
@@ -318,7 +320,8 @@ useEffect(() => {
       {currentPage === 'checkout' && (<CheckoutPage cartItems={cartItems} onBack={() => setCurrentPage('home')}/>)}
       {currentPage === 'profile' && (<ProfilePage user={user} onBack={() => setCurrentPage('home')} />)}
       {currentPage === 'admin' && (<AdminDashboard onLogout={handleLogout} />)}
-      {currentPage === 'orders' && (<OrderHistoryPage onBack={() => setCurrentPage('home')} />)}
+      {currentPage === 'orderDetail' && (<OrderDetailPage order={selectedOrder} onBack={() => setCurrentPage('orders')} />)}
+      {currentPage === 'orders' && (<OrderHistoryPage onBack={() => setCurrentPage('home')} onViewDetail={(order) => { setSelectedOrder(order); setCurrentPage('orderDetail'); }}/>)}
       {currentPage === 'register' && <RegisterPage onBack={() => setCurrentPage('home')} onNavigateToLogin={() => setCurrentPage('login')} onAuthSuccess={handleAuthSuccess}  />}
       {currentPage === 'login' && <LoginPage onBack={() => setCurrentPage('home')} onNavigateToRegister={() => setCurrentPage('register')} onAuthSuccess={handleAuthSuccess} />}
       {currentPage === 'detail' && (
