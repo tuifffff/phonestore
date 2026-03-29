@@ -1,21 +1,48 @@
 import { useState } from 'react';
-import { DEMO_USERS } from '../data/users'; // Import đống user ở trên
 
-const LoginPage = ({ onBack, onNavigateToRegister, onAuthSuccess }) => {
-  const [email, setEmail] = useState('');
+const LoginPage = ({ onBack, onNavigateToRegister, onAuthSuccess,onNavigateToForgotPassword }) => {
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     
-    // Logic check tài khoản "thật" từ mảng demo
-    const userFound = DEMO_USERS.find(u => u.email === email && u.password === password);
+    try {
+      const res = await fetch("http://localhost:8080/api/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ username: username, password: password }) 
+      });
+      const data = await res.json(); 
+      if (res.ok && data.code === 1000) {
+   
+  
+  // 1. Lưu Token (Chìa khóa)
+  localStorage.setItem("token", data.result.token);
+  
+  // 2. Lưu ID thật (Để sau này lấy đúng giỏ hàng của người này)
+  localStorage.setItem("userID", data.result.id); 
 
-    if (userFound) {
-      alert(`Đăng nhập thành công! Quyền: ${userFound.role}`);
-      onAuthSuccess(userFound); // Gửi dữ liệu về App.jsx
-    } else {
-      alert("Sai tài khoản hoặc mật khẩu");
+  // 3. Tạo object User để hiển thị lên Header
+  const userObj = { 
+    id: data.result.id,
+    username: data.result.username,
+    role: data.result.role
+  };
+  localStorage.setItem("currentUser", JSON.stringify(userObj));
+
+  alert(`Chào mừng ${data.result.username} đã quay trở lại!`);
+  
+  // 4. Báo cho App.jsx biết để đổi trang
+  onAuthSuccess(userObj); 
+} else {
+        alert("Sai tài khoản hoặc mật khẩu!");
+      }
+    } catch (err) {
+      console.error("Lỗi đăng nhập:", err);
+      alert("Không kết nối được với Server Backend!");
     }
   };
 
@@ -26,13 +53,15 @@ const LoginPage = ({ onBack, onNavigateToRegister, onAuthSuccess }) => {
         <form className="space-y-6" onSubmit={handleLogin}>
           <input 
             type="text" 
-            placeholder="admin/user" 
+            placeholder="Username" 
+            value={username}
             className="w-full border-b border-gray-300 py-2 outline-none"
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => setUsername(e.target.value)}
           />
           <input 
             type="password" 
-            placeholder="123" 
+            placeholder="Password" 
+            value={password}
             className="w-full border-b border-gray-300 py-2 outline-none"
             onChange={(e) => setPassword(e.target.value)}
           />
@@ -41,8 +70,16 @@ const LoginPage = ({ onBack, onNavigateToRegister, onAuthSuccess }) => {
           </button>
         </form>
         <div className="mt-8 text-center text-sm">
-          Chưa có tài khoản? <button onClick={onNavigateToRegister} className="font-bold border-b border-black cursor-pointer ">Đăng ký ngay</button>
+          Chưa có tài khoản? <button onClick={onNavigateToRegister} className="font-bold border-b border-black cursor-pointer">Đăng ký ngay</button>
         </div>
+        <div className="mt-4 text-center text-sm">
+            <button 
+              onClick={onNavigateToForgotPassword} 
+              className="text-[#DB4444] font-medium hover:underline cursor-pointer"
+            >
+              Quên mật khẩu?
+            </button>
+          </div>
         <button onClick={onBack} className="mt-4 text-gray-400 cursor-pointer">← Quay lại trang chủ</button>
       </div>
     </div>

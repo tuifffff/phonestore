@@ -1,37 +1,28 @@
-import { useState,useEffect } from 'react';
-import LoginPage from './components/LoginPage'; // Đảm bảo ông đã tách file này
+import { useState, useEffect } from 'react';
+import LoginPage from './components/LoginPage';
 import CartPage from './components/CartPage';
-import { DEMO_USERS } from './data/users';
 import ProductDetailPage from './components/ProductDetailPage';
-import { PRODUCTS } from './data/products';
 import CheckoutPage from './components/CheckoutPage';
 import AdminDashboard from './components/AdminDashboard';
 import ProfilePage from './components/ProfilePage';
 import OrderHistoryPage from './components/OrderHistoryPage';
 import OrderDetailPage from './components/OrderDetailPage';
-const parsePrice = (priceStr) => Number(priceStr.replace(/[^0-9]/g, ''));
-// --- TÁCH COMPONENT RA NGOÀI ĐỂ TRÁNH RE-RENDER ---
-const RegisterPage = ({ onBack, onNavigateToLogin }) => (
-  <div className="min-h-screen bg-white flex flex-col md:flex-row items-center">
-    <div className="w-1/2 mx-auto md:w-1/2 p-10 md:p-20 flex flex-col justify-center">
-      <h2 className="text-3xl font-bold mb-2">Create an account</h2>
-      <p className="text-gray-500 mb-8">Enter your details below</p>
-      <form className="space-y-6">
-        <input type="text" placeholder="Name" className="w-full border-b border-gray-300 py-2 outline-none" />
-        <input type="text" placeholder="Email or Phone" className="w-full border-b border-gray-300 py-2 outline-none" />
-        <input type="password" placeholder="Password" className="w-full border-b border-gray-300 py-2 outline-none" />
-        <button className="w-full bg-[#DB4444] text-white py-4 rounded font-medium cursor-pointer">Create Account</button>
-      </form>
-      <div className="mt-8 text-center text-sm">
-        Already have account? <button onClick={onNavigateToLogin} className="font-bold border-b border-black cursor-pointer">Log in</button>
-      </div>
-    </div>
-  </div>
-);
+import ForgotPasswordPage from './components/ForgotPasswordPage';
+import RegisterPage from './components/RegisterPage';
+import {
+  getProducts,
+  getProductDetail,
+  getBrands,
+  getCart,
+  addToCartAPI,
+  updateCartItemAPI,
+  removeFromCartAPI,
+} from './api/api';
+
 // --- HÀM CHÍNH APP ---
 function App() {
-  const [cart, setCart] = useState(0);
-  const [activeCategory, setActiveCategory] = useState('Tất cả');
+  // --- STATES ---
+  const [activeCategory, setActiveCategory] = useState(null); // null = Tất cả
   const [activeSort, setActiveSort] = useState('Phổ biến');
   const [searchTerm, setSearchTerm] = useState('');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -39,114 +30,265 @@ function App() {
   const [currentPage, setCurrentPage] = useState('home');
   const [user, setUser] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
-  
   const [checkoutMode, setCheckoutMode] = useState("checkout");
-  // --- TRONG HÀM App() ---
-// 1. Hàm cập nhật số lượng theo ID (Dùng bản này)
-const updateCartQuantity = (productId, delta) => {
-  setCartItems(prevCart => {
-    const newCart = prevCart.map(item => {
-      // So sánh theo ID để đảm bảo chính xác tuyệt đối
-      if (item.id == productId) { 
-        const newQty = (item.quantity || 1) + delta;
-        return { ...item, quantity: newQty > 0 ? newQty : 1 };
-      }
-      return item;
-    });
-    // Lưu vào kho riêng của user
-    if (user) localStorage.setItem(`cart_${user.email}`, JSON.stringify(newCart));
-    return newCart;
-  });
-};
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [cartItems, setCartItems] = useState([]);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
 
-// 2. Hàm xóa sản phẩm theo ID (Viết mới bản này)
-const removeFromCartById = (productId) => {
-  const newCart = cartItems.filter(item => item.id != productId);
-  setCartItems(newCart);
-  if (user) localStorage.setItem(`cart_${user.email}`, JSON.stringify(newCart));
-};
-  const handleBuyNow = (product, qty, color, storage) => {
-  // Giả lập việc thêm với các thuộc tính đã chọn
-  const itemWithOptions = {
-    ...product,
-    quantity: qty,
-    selectedColor: color,
-    selectedStorage: storage
+  // --- STATES MỚI: SẢN PHẨM TỪ DB ---
+  const [products, setProducts] = useState([]);
+  const [brands, setBrands] = useState([]);
+  const [loadingProducts, setLoadingProducts] = useState(true);
+  const [currentAPIPage, setCurrentAPIPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalElements, setTotalElements] = useState(0);
+
+  // --- STATES: BỘ LỌC GIÁ & KHO ---
+  const [minPrice, setMinPrice] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
+  const [inStock, setInStock] = useState(null); // null = tất cả, true = còn hàng, false = hết hàng
+  const [activePriceRange, setActivePriceRange] = useState(null); // theo dõi preset đang chọn
+
+  // --- XỬ LÝ VNPay RETURN URL ---
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const paymentStatus = urlParams.get('paymentStatus');
+    const page = urlParams.get('page');
+    const orderId = urlParams.get('orderId');
+    const msg = urlParams.get('msg');
+
+    if (paymentStatus) {
+      if (paymentStatus === 'success') {
+        alert(`Thanh toán thành công qua VNPay (Mã Đơn: #${orderId}). Cảm ơn bạn đã mua hàng! 🎉`);
+      } else if (paymentStatus === 'failed') {
+        alert('Thanh toán VNPay thất bại hoặc đã bị bạn hủy!');
+      } else if (paymentStatus === 'error') {
+        alert(`Lỗi thanh toán: ${msg || 'Mã đơn hàng không hợp lệ'}`);
+      } else if (paymentStatus === 'checksum_failed') {
+        alert('Cảnh báo: Phát hiện gian lận dữ liệu thanh toán!');
+      }
+      
+      // Xóa params khỏi thanh cuộn URL để F5 không báo lại
+      window.history.replaceState({}, document.title, window.location.pathname);
+      
+      if (page) {
+        setCurrentPage(page);
+      }
+    }
+  }, []);
+
+  // --- HÀM LOAD SẢN PHẨM TỪ API ---
+  const loadProducts = async (page = 0) => {
+    setLoadingProducts(true);
+    try {
+      // Xác định sortBy dựa trên activeSort
+      let sortBy = 'productID';
+      let sortDir = 'desc';
+      if (activeSort === 'Giá Thấp - Cao') {
+        sortBy = 'priceAsc';
+      } else if (activeSort === 'Giá Cao - Thấp') {
+        sortBy = 'priceDesc';
+      }
+
+      const params = {
+        page,
+        size: 20,
+        sortBy,
+        sortDir,
+        keyword: searchTerm || undefined,
+        brandId: activeCategory || undefined,
+        minPrice: minPrice || undefined,
+        maxPrice: maxPrice || undefined,
+        inStock: inStock !== null ? inStock : undefined,
+      };
+
+      const data = await getProducts(params);
+      const pageData = data.result;
+      setProducts(pageData.content || []);
+      setCurrentAPIPage(pageData.page);
+      setTotalPages(pageData.totalPages);
+      setTotalElements(pageData.totalElements);
+    } catch (err) {
+      console.error("Lỗi tải sản phẩm:", err);
+    } finally {
+      setLoadingProducts(false);
+    }
   };
 
-  // 1. Thêm vào giỏ hàng
-  addToCart(itemWithOptions);
-  
-  // 2. Chuyển thẳng sang trang Giỏ hàng
-  setCurrentPage('cart');
-};
-  const [selectedProduct, setSelectedProduct] = useState(null); // Lưu thông tin sản phẩm đang xem
-  // 1. Thêm State để lưu danh sách món hàng thực tế
-  const [cartItems, setCartItems] = useState([]);
+  // --- HÀM LOAD BRANDS (DANH MỤC) TỪ API ---
+  const loadBrands = async () => {
+    try {
+      const data = await getBrands();
+      setBrands(data.result || []);
+    } catch (err) {
+      console.error("Lỗi tải danh mục:", err);
+    }
+  };
 
-// 2. Hàm để tải giỏ hàng riêng của từng người từ máy (localStorage)
-  // Sửa lại hàm loadUserCart để không bị crash nếu không có email
-const loadUserCart = (email) => {
-  if (!email) {
-    setCartItems([]);
-    return;
-  }
-  const savedCart = localStorage.getItem(`cart_${email}`);
-  setCartItems(savedCart ? JSON.parse(savedCart) : []);
-};
+  // --- HÀM LOAD GIỎ HÀNG TỪ API ---
+  const loadCartFromAPI = async () => {
+    try {
+      const data = await getCart();
+      setCartItems(data.result || []);
+    } catch (err) {
+      console.error("Không lấy được giỏ hàng:", err);
+      setCartItems([]);
+    }
+  };
 
-// Trong useEffect hoặc lúc khởi tạo, hãy kiểm tra user trước
-useEffect(() => {
-  const savedUser = localStorage.getItem('currentUser');
-  if (savedUser) {
-    const userData = JSON.parse(savedUser);
+  // --- LOAD BRANDS KHI APP KHỞI CHẠY ---
+  useEffect(() => {
+    loadBrands();
+  }, []);
+
+  // --- LOAD SẢN PHẨM KHI FILTER/SORT/SEARCH THAY ĐỔI ---
+  useEffect(() => {
+    const debounce = setTimeout(() => loadProducts(0), 300);  // Debounce search
+    return () => clearTimeout(debounce);
+  }, [activeCategory, activeSort, searchTerm, minPrice, maxPrice, inStock]);
+
+  // --- KHỞI TẠO USER TỪ LOCALSTORAGE ---
+  useEffect(() => {
+    const savedUser = localStorage.getItem('currentUser');
+    const token = localStorage.getItem('token');
+
+    if (savedUser && token) {
+      const userData = JSON.parse(savedUser);
+      setUser(userData);
+      loadCartFromAPI();
+      // Nếu là ADMIN thì giữ lại trang admin khi F5
+      if (userData.role === 'ADMIN') {
+        setCurrentPage('admin');
+      }
+    } else {
+      handleLogout();
+    }
+  }, []);
+
+  // --- XEM CHI TIẾT SẢN PHẨM ---
+  const handleViewDetail = async (productId) => {
+    try {
+      const data = await getProductDetail(productId);
+      if (data.code === 1000) {
+        setSelectedProduct(data.result);
+        setCurrentPage('detail');
+        window.scrollTo(0, 0);
+      } else {
+        alert("Lỗi: " + data.message);
+      }
+    } catch (err) {
+      console.error("Lỗi fetch chi tiết:", err);
+      alert("Không kết nối được với Server Backend!");
+    }
+  };
+
+  // --- CẬP NHẬT SỐ LƯỢNG GIỎ HÀNG (GỌI API) ---
+  const updateCartQuantity = async (versionID, delta) => {
+    // Tìm item hiện tại để tính quantity mới
+    const item = cartItems.find(i => i.id == versionID);
+    if (!item) return;
+
+    const newQty = (item.quantity || 1) + delta;
+    if (newQty < 1) return;
+
+    try {
+      await updateCartItemAPI(versionID, newQty);
+      // Refresh giỏ hàng từ server
+      await loadCartFromAPI();
+    } catch (err) {
+      console.error("Lỗi cập nhật giỏ hàng:", err);
+      alert("Không thể cập nhật số lượng!");
+    }
+  };
+
+  // --- XÓA SẢN PHẨM KHỎI GIỎ (GỌI API) ---
+  const removeFromCartById = async (versionID) => {
+    try {
+      await removeFromCartAPI(versionID);
+      await loadCartFromAPI();
+    } catch (err) {
+      console.error("Lỗi xóa sản phẩm:", err);
+      alert("Không thể xóa sản phẩm khỏi giỏ hàng!");
+    }
+  };
+
+  // --- MUA NGAY ---
+  const handleBuyNow = async (product, qty, color, storage) => {
+    if (!user) return setIsLoginModalOpen(true);
+
+    // Tìm versionID phù hợp
+    const version = product.versions?.find(
+      v => v.colour === color && v.storage === storage
+    );
+    if (!version) {
+      alert("Không tìm thấy phiên bản này!");
+      return;
+    }
+
+    try {
+      await addToCartAPI(version.versionID, qty);
+      await loadCartFromAPI();
+      setCurrentPage('cart');
+    } catch (err) {
+      console.error("Lỗi mua ngay:", err);
+      alert("Không thể thêm vào giỏ hàng!");
+    }
+  };
+
+  // --- THÊM VÀO GIỎ HÀNG (GỌI API) ---
+  const addToCart = async (product) => {
+    if (!user) return setIsLoginModalOpen(true);
+
+    // Lấy versionID từ product (đã chọn ở trang chi tiết)
+    const version = product.versions?.find(
+      v => v.colour === product.selectedColor && v.storage === product.selectedStorage
+    );
+
+    const versionID = version?.versionID;
+    if (!versionID) {
+      alert("Vui lòng chọn phiên bản sản phẩm!");
+      return;
+    }
+
+    try {
+      await addToCartAPI(versionID, product.quantity || 1);
+      await loadCartFromAPI();
+      alert(`Đã thêm ${product.name} vào giỏ hàng!`);
+    } catch (err) {
+      console.error("Lỗi thêm giỏ hàng:", err);
+      alert(err.message || "Không thể thêm vào giỏ hàng!");
+    }
+  };
+
+  // --- ĐĂNG NHẬP THÀNH CÔNG ---
+  const handleAuthSuccess = (userData) => {
     setUser(userData);
-    loadUserCart(userData.email);
-  } else {
+    loadCartFromAPI(); // Load giỏ hàng từ DB
+    if (userData.role === 'ADMIN') {
+      setCurrentPage('admin');
+    } else {
+      setCurrentPage('home');
+    }
+    setIsLoginModalOpen(false);
+  };
+
+  // --- ĐĂNG XUẤT ---
+  const handleLogout = () => {
     setUser(null);
     setCartItems([]);
-  }
-}, []);
+    setIsUserMenuOpen(false);
+    localStorage.removeItem('currentUser');
+    localStorage.removeItem('token');
+    localStorage.removeItem('userID');
+    setCurrentPage('home');
+  };
 
-// 3. Cập nhật hàm handleAuthSuccess
-  const handleAuthSuccess = (userData) => {
-  setUser(userData);
-  loadUserCart(userData.email); // <--- Tải đúng giỏ hàng của người này lên
-  if (userData.email === 'admin' || userData.role === 'admin') {
-    setCurrentPage('admin'); // Chuyển sang trang Dashboard Admin
-  } else {
-    setCurrentPage('home');  // Khách hàng bình thường thì về trang chủ
-  }
-  setIsLoginModalOpen(false);
-};
-
-// 4. Cập nhật hàm handleLogout
-  const handleLogout = () => {
-  setUser(null);
-  setCartItems([]); // <--- Xóa sạch giỏ hàng trên màn hình khi thoát
-  setIsUserDropdownOpen(false);
-  localStorage.removeItem('currentUser');
-};
-  const addToCart = (product) => {
-  if (!user) return setIsLoginModalOpen(true); // Chưa login thì bắt login
-
-  const newCart = [...cartItems, product];
-  setCartItems(newCart);
-  
-  // Lưu vào kho riêng của User này: ví dụ cart_admin@phonehub.com
-  localStorage.setItem(`cart_${user.email}`, JSON.stringify(newCart));
-  alert(`Đã thêm ${product.name} vào giỏ hàng `);
-};
-  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false); // Để bật/tắt cái lưới menu
-  // LOGIC TỔNG HỢP: Tự tính toán danh sách
-  const filteredProducts = PRODUCTS
-    .filter(p => activeCategory === 'Tất cả' || p.category === activeCategory)
-    .filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()))
-    .sort((a, b) => {
-      if (activeSort === 'Giá Cao - Thấp') return parsePrice(b.price) - parsePrice(a.price);
-      if (activeSort === 'Giá Thấp - Cao') return parsePrice(a.price) - parsePrice(b.price);
-      return 0;
-    });
+  // --- TÌM TÊN BRAND ĐANG CHỌN ---
+  const getActiveBrandName = () => {
+    if (!activeCategory) return 'Tất cả';
+    const brand = brands.find(b => b.id === activeCategory);
+    return brand ? brand.name : 'Tất cả';
+  };
 
   return (
     <>
@@ -155,25 +297,7 @@ useEffect(() => {
           
           <header className="bg-[#058a81] text-white py-2 shadow-md sticky top-0 z-50">
             <div className="max-w-7xl mx-auto px-4 flex items-center gap-4">
-              <div className="text-xl font-bold tracking-tighter">PhoneHub</div>
-              
-              
-              {/* <div className="relative">
-                <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="hidden md:flex items-center gap-2 bg-white/20 px-3 py-2 rounded-lg font-medium">
-                   <span>☰ Danh mục</span>
-                </button>
-                {isMenuOpen && (
-                  <div className="absolute top-12 left-0 w-48 bg-white text-black shadow-xl rounded-lg border p-2 z-50">
-                    {['Tất cả', 'iPhone', 'SamSung','Xiaomi'].map(cat => (
-                      <div key={cat} onClick={() => { setActiveCategory(cat); setIsMenuOpen(false); }} className="p-2 hover:bg-gray-100 cursor-pointer rounded">
-                        {cat}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                
-                
-              </div> */}
+              <div className="text-xl font-bold tracking-tighter cursor-pointer" onClick={() => { setActiveCategory(null); setSearchTerm(''); }}>PhoneHub</div>
               
               <div className="flex-1">
                 <input 
@@ -189,33 +313,28 @@ useEffect(() => {
                   <span className="absolute -top-2 -right-2 bg-yellow-400 text-red-600 text-[10px] font-bold px-1.5 rounded-full">{cartItems.length}</span>
                 </div>
                 {user ? (
-    /* Giao diện khi ĐÃ đăng nhập thành công */
     <div className="relative">
       <button 
-        onClick={() => setIsUserMenuOpen(!isUserMenuOpen)} // Bấm để thả lưới
+        onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
         className="flex items-center gap-2 bg-white/20 px-3 py-2 rounded-lg hover:bg-white/30 transition cursor-pointer border border-white/10"
       >
         <div className="w-6 h-6 bg-yellow-400 rounded-full text-[#058a81] flex items-center justify-center font-bold text-[10px]">
-          {user.name.charAt(0).toUpperCase()}
+          {(user?.username || "?").charAt(0).toUpperCase()}
         </div>
-        <span className="font-bold uppercase tracking-tight">{user.name}</span>
+        <span className="font-bold uppercase tracking-tight">{user?.username || "Thành viên"}</span>
         <span className={`text-[10px] transition-transform ${isUserMenuOpen ? 'rotate-180' : ''}`}>▼</span>
       </button>
 
-      {/* CÁI LƯỚI THẢ XUỐNG (DROPDOWN) */}
       {isUserMenuOpen && (
         <>
-          {/* Lớp phủ để bấm ra ngoài là đóng lưới */}
           <div className="fixed inset-0 z-40" onClick={() => setIsUserMenuOpen(false)}></div>
-          
           <div className="absolute right-0 mt-2 w-48 bg-white text-black shadow-2xl rounded-xl border py-2 z-50 overflow-hidden ">
             <button onClick={() => { setCurrentPage("profile");setIsUserMenuOpen(false);}} className="w-full text-left px-4 py-2 hover:bg-gray-100 transition flex items-center gap-2">
               <span>👤</span> Thông tin tài khoản
             </button>
             <button onClick={() => {setCurrentPage("orders");setIsUserMenuOpen(false);}} className="w-full text-left px-4 py-2 hover:bg-gray-100 transition flex items-center gap-2">
-              <span>👤</span> Lịch sử mua hàng
+              <span>📦</span> Lịch sử mua hàng
             </button>
-            
             <button 
               onClick={handleLogout}
               className="w-full text-left px-4 py-2 hover:bg-red-50 text-red-600 border-t mt-1 transition font-bold flex items-center gap-2"
@@ -245,91 +364,257 @@ useEffect(() => {
           </div>
 
           <main className="max-w-7xl mx-auto px-4 pb-10">
-            {/* BƯỚC 1: Dùng Flex để chia đôi màn hình: Trái (Aside) - Phải (Content) */}
   <div className="flex flex-col md:flex-row gap-6">
 
-    {/* BƯỚC 2: SIDE TAB DANH MỤC (Nằm bên trái) */}
-    <aside className="w-full md:w-64 bg-white rounded-2xl shadow-sm border h-fit sticky top-20 transition-all duration-300">
+    {/* SIDE TAB DANH MỤC - LOAD TỪ API */}
+    <aside className="w-full md:w-64 bg-white rounded-2xl shadow-sm border h-fit transition-all duration-300">
       <div className="p-4 border-b font-black text-[#058a81] text-xs uppercase tracking-widest">
         Danh mục sản phẩm
       </div>
       <nav className="py-2">
-        {['Tất cả', 'iPhone', 'SamSung', 'Xiaomi'].map((cat) => (
+        {/* Nút "Tất cả" */}
+        <div 
+          onClick={() => setActiveCategory(null)}
+          className={`flex items-center justify-between px-5 py-4 cursor-pointer transition-all border-l-4
+            ${activeCategory === null
+              ? 'bg-blue-50 text-[#058a81] font-bold border-[#058a81]' 
+              : 'text-gray-500 border-transparent hover:bg-gray-50'}`}
+        >
+          <div className="flex items-center gap-3">
+            <span className="text-[13px]">Tất cả</span>
+          </div>
+          <span className="text-gray-300 text-xs">›</span>
+        </div>
+        {/* Các brand từ API */}
+        {brands.map((brand) => (
           <div 
-            key={cat}
-            onClick={() => setActiveCategory(cat)}
+            key={brand.id}
+            onClick={() => setActiveCategory(brand.id)}
             className={`flex items-center justify-between px-5 py-4 cursor-pointer transition-all border-l-4
-              ${activeCategory === cat 
+              ${activeCategory === brand.id 
                 ? 'bg-blue-50 text-[#058a81] font-bold border-[#058a81]' 
                 : 'text-gray-500 border-transparent hover:bg-gray-50'}`}
           >
             <div className="flex items-center gap-3">
-              <span className="text-[13px]">{cat}</span>
+              {brand.logo && <img src={brand.logo} alt={brand.name} className="w-5 h-5 object-contain" />}
+              <span className="text-[13px]">{brand.name}</span>
             </div>
             <span className="text-gray-300 text-xs">›</span>
           </div>
         ))}
       </nav>
+
+      {/* BỘ LỌC KHOẢNG GIÁ */}
+      <div className="border-t">
+        <div className="p-4 font-black text-[#058a81] text-xs uppercase tracking-widest">
+          Khoảng giá
+        </div>
+        <div className="px-4 pb-4 space-y-2">
+          {/* Preset giá nhanh */}
+          {[
+            { label: 'Dưới 5 triệu', min: '', max: '5000000' },
+            { label: '5 - 10 triệu', min: '5000000', max: '10000000' },
+            { label: '10 - 20 triệu', min: '10000000', max: '20000000' },
+            { label: '20 - 30 triệu', min: '20000000', max: '30000000' },
+            { label: 'Trên 30 triệu', min: '30000000', max: '' },
+          ].map((range, idx) => (
+            <button
+              key={idx}
+              onClick={() => {
+                if (activePriceRange === idx) {
+                  setMinPrice(''); setMaxPrice(''); setActivePriceRange(null);
+                } else {
+                  setMinPrice(range.min); setMaxPrice(range.max); setActivePriceRange(idx);
+                }
+              }}
+              className={`w-full text-left px-3 py-2 rounded-lg text-[12px] transition-all cursor-pointer ${
+                activePriceRange === idx
+                  ? 'bg-[#058a81] text-white font-bold'
+                  : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              {range.label}
+            </button>
+          ))}
+
+          {/* Input tùy chỉnh */}
+          <div className="flex gap-2 items-center pt-2">
+            <input
+              type="number" placeholder="Từ" value={minPrice}
+              onChange={(e) => { setMinPrice(e.target.value); setActivePriceRange(null); }}
+              className="w-full bg-gray-50 border rounded-lg px-2 py-1.5 text-xs outline-none focus:border-[#058a81]"
+            />
+            <span className="text-gray-300 text-xs">→</span>
+            <input
+              type="number" placeholder="Đến" value={maxPrice}
+              onChange={(e) => { setMaxPrice(e.target.value); setActivePriceRange(null); }}
+              className="w-full bg-gray-50 border rounded-lg px-2 py-1.5 text-xs outline-none focus:border-[#058a81]"
+            />
+          </div>
+          {(minPrice || maxPrice) && (
+            <button
+              onClick={() => { setMinPrice(''); setMaxPrice(''); setActivePriceRange(null); }}
+              className="text-[10px] text-red-500 font-bold hover:underline cursor-pointer"
+            >
+              ✕ Xóa lọc giá
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* LỌC TÌNH TRẠNG KHO */}
+      <div className="border-t">
+        <div className="p-4 font-black text-[#058a81] text-xs uppercase tracking-widest">
+          Tình trạng
+        </div>
+        <div className="px-4 pb-4 space-y-2">
+          {[
+            { label: 'Tất cả', value: null },
+            { label: 'Còn hàng', value: true },
+            { label: 'Hết hàng', value: false },
+          ].map((opt) => (
+            <button
+              key={String(opt.value)}
+              onClick={() => setInStock(opt.value)}
+              className={`w-full text-left px-3 py-2 rounded-lg text-[12px] transition-all cursor-pointer ${
+                inStock === opt.value
+                  ? 'bg-[#058a81] text-white font-bold'
+                  : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
     </aside>
 
-    {/* BƯỚC 3: PHẦN BÊN PHẢI (HERO BAR + GRID SẢN PHẨM) */}
+    {/* PHẦN BÊN PHẢI */}
     <div className="flex-1 space-y-6">
       
-      {/* HERO BAR - BANNER QUẢNG CÁO (Giống Hoang Ha/CellphoneS) */}
+      {/* HERO BANNER */}
       <div className="bg-white rounded-2xl overflow-hidden shadow-sm aspect-[21/9] md:aspect-[25/9] border relative group">
         <img 
-          src="https://cdn2.cellphones.com.vn/insecure/rs:fill:1036:450/q:100/plain/https://dashboard.cellphones.com.vn/storage/iphone17-home-8-3-1.png" // Ông thay link ảnh xịn vào đây nhé
+          src="https://cdn2.cellphones.com.vn/insecure/rs:fill:1036:450/q:100/plain/https://dashboard.cellphones.com.vn/storage/iphone17-home-8-3-1.png"
           className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" 
           alt="Banner Sale" 
         />
-        {/* Lớp phủ nhẹ cho sang */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent"></div>
       </div>
 
-      {/* TIÊU ĐỀ & GRID SẢN PHẨM CỦA ÔNG */}
+      {/* TIÊU ĐỀ & GRID SẢN PHẨM */}
       <div className="space-y-4">
         <div className="flex justify-between items-center">
-          <h2 className="text-xl font-black text-gray-800 uppercase "> {activeCategory}</h2>
+          <h2 className="text-xl font-black text-gray-800 uppercase">{getActiveBrandName()}</h2>
           <div className="h-1 flex-1 mx-4 bg-gray-100 rounded-full hidden md:block"></div>
+          <span className="text-sm text-gray-400">{totalElements} sản phẩm</span>
         </div>
+
+        {/* LOADING STATE */}
+        {loadingProducts ? (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+            {[...Array(10)].map((_, i) => (
+              <div key={i} className="bg-white rounded-xl p-3 shadow-sm animate-pulse">
+                <div className="bg-gray-200 h-40 rounded-lg mb-3"></div>
+                <div className="bg-gray-200 h-4 rounded mb-2"></div>
+                <div className="bg-gray-200 h-4 rounded w-2/3"></div>
+              </div>
+            ))}
+          </div>
+        ) : products.length === 0 ? (
+          <div className="text-center py-20 text-gray-400">
+            <div className="text-5xl mb-4">📱</div>
+            <p className="font-bold">Không tìm thấy sản phẩm nào</p>
+            <p className="text-sm mt-2">Thử tìm kiếm với từ khóa khác</p>
+          </div>
+        ) : (
+          <>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-              
-              {filteredProducts.map((p) => (
-                <div key={p.id} onClick={() => {setSelectedProduct(p);setCurrentPage('detail');}} className="bg-white rounded-xl p-3 shadow-sm relative flex flex-col justify-between">
-                  <div className="absolute top-0 left-0 bg-red-600 text-white text-[10px] px-2 py-1 rounded-tl-xl rounded-br-xl font-bold">Giảm {p.discount}</div>
-                  <div className="py-4 cursor-pointer" onClick={() => setCart(cart + 1)}>
-                    <img src={p.img} alt={p.name} className="w-full h-auto object-contain hover:scale-105 transition-transform" />
+              {products.map((p) => (
+                <div key={p.id} onClick={() => handleViewDetail(p.id)} className="bg-white rounded-xl p-3 shadow-sm relative flex flex-col justify-between cursor-pointer hover:shadow-md transition-shadow">
+                  <div className="py-4">
+                    <img src={p.image} alt={p.name} className="w-full h-auto object-contain hover:scale-105 transition-transform" />
                   </div>
                   <div>
                     <h3 className="font-semibold text-[13px] leading-tight line-clamp-2 h-10">{p.name}</h3>
                     <div className="mt-2 flex items-baseline gap-2">
-                      <span className="text-red-600 font-bold text-base">{p.price}</span>
-                      <span className="text-gray-400 line-through text-[11px]">{p.oldPrice}</span>
+                      <span className="text-red-600 font-bold text-base">
+                        {p.minPrice ? Number(p.minPrice).toLocaleString('vi-VN') + '₫' : 'Liên hệ'}
+                      </span>
                     </div>
+                    {p.brandName && (
+                      <span className="text-[10px] text-gray-400 mt-1 block">{p.brandName}</span>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
-            </div>
-            </div>
-            </div>
+
+            {/* PHÂN TRANG */}
+            {totalPages > 1 && (
+              <div className="flex justify-center items-center gap-2 pt-6">
+                <button 
+                  onClick={() => loadProducts(currentAPIPage - 1)} 
+                  disabled={currentAPIPage === 0}
+                  className="px-4 py-2 rounded-lg border text-sm font-bold disabled:opacity-30 disabled:cursor-not-allowed hover:bg-gray-50 transition"
+                >
+                  ← Trước
+                </button>
+                {[...Array(totalPages)].map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => loadProducts(i)}
+                    className={`w-9 h-9 rounded-lg text-sm font-bold transition ${
+                      currentAPIPage === i 
+                        ? 'bg-[#058a81] text-white shadow-md' 
+                        : 'bg-white border hover:bg-gray-50'
+                    }`}
+                  >
+                    {i + 1}
+                  </button>
+                ))}
+                <button 
+                  onClick={() => loadProducts(currentAPIPage + 1)} 
+                  disabled={currentAPIPage >= totalPages - 1}
+                  className="px-4 py-2 rounded-lg border text-sm font-bold disabled:opacity-30 disabled:cursor-not-allowed hover:bg-gray-50 transition"
+                >
+                  Sau →
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  </div>
           </main>
         </div>
       )}
-      {currentPage === 'cart' && (<CartPage cartItems={cartItems} onBack={() => setCurrentPage('home')}onRemove={removeFromCartById}onUpdateQty={updateCartQuantity}onNavigateToCheckout={() => {setCheckoutMode("checkout");setCurrentPage("checkout");}}/>)}
-      {currentPage === 'checkout' && (<CheckoutPage cartItems={cartItems} onBack={() => setCurrentPage('home')}/>)}
+      {currentPage === 'cart' && (
+        <CartPage 
+          cartItems={cartItems} 
+          onBack={() => setCurrentPage('home')}
+          onRemove={removeFromCartById}
+          onUpdateQty={updateCartQuantity}
+          onNavigateToCheckout={() => {setCheckoutMode("checkout");setCurrentPage("checkout");}}
+        />
+      )}
+      {currentPage === 'checkout' && (<CheckoutPage cartItems={cartItems} onBack={() => setCurrentPage('cart')} onCheckoutSuccess={() => { loadCartFromAPI(); setCurrentPage('home'); }} />)}
       {currentPage === 'profile' && (<ProfilePage user={user} onBack={() => setCurrentPage('home')} />)}
-      {currentPage === 'admin' && (<AdminDashboard onLogout={handleLogout} />)}
+      {currentPage === 'admin' && (<AdminDashboard onLogout={handleLogout} user={user} />)}
       {currentPage === 'orderDetail' && (<OrderDetailPage order={selectedOrder} onBack={() => setCurrentPage('orders')} />)}
+      {currentPage === 'forgot-password' && (<ForgotPasswordPage onBack={() => setCurrentPage('login')} />)}
       {currentPage === 'orders' && (<OrderHistoryPage onBack={() => setCurrentPage('home')} onViewDetail={(order) => { setSelectedOrder(order); setCurrentPage('orderDetail'); }}/>)}
-      {currentPage === 'register' && <RegisterPage onBack={() => setCurrentPage('home')} onNavigateToLogin={() => setCurrentPage('login')} onAuthSuccess={handleAuthSuccess}  />}
-      {currentPage === 'login' && <LoginPage onBack={() => setCurrentPage('home')} onNavigateToRegister={() => setCurrentPage('register')} onAuthSuccess={handleAuthSuccess} />}
+      {currentPage === 'register' && <RegisterPage onBack={() => setCurrentPage('login')} onNavigateToLogin={() => setCurrentPage('login')} onAuthSuccess={handleAuthSuccess}  />}
+      {currentPage === 'login' && <LoginPage onBack={() => setCurrentPage('home')} onNavigateToRegister={() => setCurrentPage('register')} onAuthSuccess={handleAuthSuccess} onNavigateToForgotPassword={() => setCurrentPage('forgot-password')} />}
       {currentPage === 'detail' && (
       <ProductDetailPage 
         product={selectedProduct} 
         onBack={() => setCurrentPage('home')}
         onAddToCart={addToCart}
         onBuyNow={handleBuyNow}
+        user={user}
+        onLoginRequired={() => setIsLoginModalOpen(true)}
       />
     )}
       {isLoginModalOpen && (
