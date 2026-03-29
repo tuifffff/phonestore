@@ -2,7 +2,7 @@
 // FILE API TẬP TRUNG - Quản lý tất cả API calls ở 1 nơi duy nhất
 // ============================================================
 
-const BASE_URL = "http://localhost:8080/api";
+const BASE_URL = `${import.meta.env.VITE_API_URL}/api`;
 
 // --- HÀM GỌI API CÓ GẮN TOKEN TỰ ĐỘNG ---
 const fetchWithAuth = async (url, options = {}) => {
@@ -102,7 +102,7 @@ export const uploadGallery = (productId, files) => {
   const token = localStorage.getItem("token");
   const formData = new FormData();
   files.forEach(file => formData.append("files", file));
-  return fetch(`http://localhost:8080/api/products/${productId}/gallery`, {
+  return fetch(`${import.meta.env.VITE_API_URL}/api/products/${productId}/gallery`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
     body: formData,

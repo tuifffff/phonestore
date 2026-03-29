@@ -13,7 +13,7 @@ const ForgotPasswordPage = ({ onBack }) => {
     setLoading(true);
     try {
       // Sửa lại URL đúng chuẩn của ông: dùng @RequestParam email
-      const res = await fetch(`http://localhost:8080/api/user/forgot-password/send-otp?email=${email}`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/user/forgot-password/send-otp?email=${email}`, {
         method: "POST",
       });
       const data = await res.json();
@@ -37,7 +37,7 @@ const ForgotPasswordPage = ({ onBack }) => {
     setLoading(true);
     try {
       // Sửa lại URL đúng chuẩn @RequestMapping("/api/user") của ông
-      const res = await fetch("http://localhost:8080/api/user/forgot-password/reset", {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/user/forgot-password/reset`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
