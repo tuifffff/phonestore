@@ -5,8 +5,9 @@ import {
   getAllOrders, updateOrderStatus, rejectOrder, confirmPayment, countPendingOrders, getOrderDetail, exportInvoice,
   getAllUsers, updateUserRole, revokeUserRole, getRoles, createRole, deleteRole, getPermissions, createPermission,
   getRevenue, getTopSelling,
-  uploadGallery,
+  uploadGallery, uploadImage,
   getMyInfo, updateMyInfo, changePassword,
+  getAllBanners, createBanner, deleteBanner, toggleBanner,
 } from '../api/api';
 
 // ====================================================================
@@ -57,6 +58,7 @@ const AdminDashboard = ({ onLogout, user }) => {
                 <p onClick={() => setActiveTab('product-list')} className={`cursor-pointer py-2 text-sm ${activeTab === 'product-list' ? 'text-[#4318FF] font-bold' : 'text-[#A3AED0] hover:text-[#4318FF]'}`}>Danh sách Sản Phẩm</p>
                 <p onClick={() => setActiveTab('product-upload')} className={`cursor-pointer py-2 text-sm ${activeTab === 'product-upload' ? 'text-[#4318FF] font-bold' : 'text-[#A3AED0] hover:text-[#4318FF]'}`}>Thêm Sản Phẩm</p>
                 <p onClick={() => setActiveTab('brand-manage')} className={`cursor-pointer py-2 text-sm ${activeTab === 'brand-manage' ? 'text-[#4318FF] font-bold' : 'text-[#A3AED0] hover:text-[#4318FF]'}`}>Quản lý Hãng</p>
+                <p onClick={() => setActiveTab('banner-manage')} className={`cursor-pointer py-2 text-sm ${activeTab === 'banner-manage' ? 'text-[#4318FF] font-bold' : 'text-[#A3AED0] hover:text-[#4318FF]'}`}>Quản lý Banner</p>
               </div>
             )}
           </div>
@@ -103,6 +105,7 @@ const AdminDashboard = ({ onLogout, user }) => {
         {activeTab === 'role-manage' && <RoleManagement />}
         {activeTab === 'permission-manage' && <PermissionManagement />}
         {activeTab === 'brand-manage' && <BrandManagement />}
+        {activeTab === 'banner-manage' && <BannerManagement />}
         {activeTab === 'admin-profile' && <AdminProfile />}
       </main>
     </div>
@@ -236,6 +239,7 @@ const OrderManagement = () => {
   const statusTabs = [
     { label: 'Tất cả', value: '' },
     { label: 'Chờ duyệt', value: 'PENDING' },
+    { label: 'Đã thanh toán', value: 'PAID' },
     { label: 'Đang giao', value: 'SHIPPING' },
     { label: 'Đã giao', value: 'DELIVERED' },
     { label: 'Đã hủy', value: 'CANCELLED' },
@@ -660,9 +664,14 @@ const ProductList = ({ onNavigateToUpload }) => {
           </div>
 
           <div>
-            <label className="text-[10px] font-black text-[#A3AED0] uppercase block mb-1">Ảnh đại diện (URL)</label>
-            <input type="text" value={editForm.image} onChange={(e) => setEditForm({ ...editForm, image: e.target.value })}
-              className="w-full bg-[#f4f7fe] rounded-xl p-3 outline-none text-sm" />
+            <label className="text-[10px] font-black text-[#A3AED0] uppercase block mb-1">Ảnh đại diện (Upload)</label>
+            <input type="file" accept="image/*" onChange={async (e) => {
+              if (e.target.files[0]) {
+                const res = await uploadImage(e.target.files[0]);
+                setEditForm({ ...editForm, image: res.result });
+              }
+            }} className="w-full bg-[#f4f7fe] rounded-xl p-2 outline-none text-sm" />
+            {editForm.image && <p className="text-[10px] text-green-600 mt-1">Đã cấp: {String(editForm.image).substring(0, 30)}...</p>}
           </div>
 
           <div>
@@ -790,9 +799,13 @@ const ProductUpload = ({ onSuccess }) => {
       {/* CỘT TRÁI: ẢNH & VERSIONS */}
       <div className="lg:col-span-1 space-y-6">
         <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-50">
-          <h4 className="font-bold mb-4">Ảnh đại diện</h4>
-          <input type="text" value={form.image} onChange={(e) => setForm({ ...form, image: e.target.value })}
-            placeholder="Dán URL ảnh sản phẩm..." className="w-full bg-[#f4f7fe] rounded-xl p-3 outline-none text-sm mb-4" />
+          <h4 className="font-bold mb-4">Ảnh đại diện (Upload)</h4>
+          <input type="file" accept="image/*" onChange={async (e) => {
+            if (e.target.files[0]) {
+              const res = await uploadImage(e.target.files[0]);
+              setForm({ ...form, image: res.result });
+            }
+          }} className="w-full bg-[#f4f7fe] rounded-xl p-2 outline-none text-sm mb-4" />
           {form.image && <img src={form.image} className="w-full h-40 object-contain bg-gray-50 rounded-2xl" alt="preview" />}
         </div>
 
@@ -842,8 +855,13 @@ const ProductUpload = ({ onSuccess }) => {
                   <input type="number" value={v.stock} onChange={(e) => updateVersion(idx, 'stock', e.target.value)}
                     placeholder="Tồn kho" className="bg-white rounded-lg p-2 text-xs outline-none border" />
                 </div>
-                <input type="text" value={v.imageURL} onChange={(e) => updateVersion(idx, 'imageURL', e.target.value)}
-                  placeholder="URL ảnh version" className="w-full bg-white rounded-lg p-2 text-xs outline-none border" />
+                <input type="file" accept="image/*" onChange={async (e) => {
+                  if (e.target.files[0]) {
+                    const res = await uploadImage(e.target.files[0]);
+                    updateVersion(idx, 'imageURL', res.result);
+                  }
+                }} className="w-full bg-white rounded-lg p-1 text-xs outline-none border text-gray-400" />
+                {v.imageURL && <p className="text-[9px] text-green-600 truncate">Ảnh: {String(v.imageURL).substring(0, 30)}...</p>}
               </div>
             ))}
           </div>
@@ -1006,6 +1024,7 @@ const CustomerManagement = () => {
             <thead>
               <tr className="text-[#A3AED0] text-xs uppercase border-b border-gray-100">
                 <th className="pb-4 font-medium">Username</th>
+                <th className="pb-4 font-medium">Họ & Tên</th>
                 <th className="pb-4 font-medium">Email</th>
                 <th className="pb-4 font-medium">SĐT</th>
                 <th className="pb-4 font-medium text-center">Vai trò</th>
@@ -1017,6 +1036,7 @@ const CustomerManagement = () => {
                 <tr key={u.userID} className={`border-b border-gray-50 hover:bg-gray-50 transition cursor-pointer ${selectedUser?.userID === u.userID ? 'bg-blue-50/50' : ''}`}
                   onClick={() => { setSelectedUser(u); setSelectedRole(u.roleName || 'USER'); }}>
                   <td className="py-4 font-bold text-[#058a81]">{u.username}</td>
+                  <td className="py-4 text-gray-800 font-bold">{u.fullName || '-'}</td>
                   <td className="py-4 text-gray-500">{u.email || '-'}</td>
                   <td className="py-4 text-gray-500">{u.phoneNumber || '-'}</td>
                   <td className="py-4 text-center">
@@ -1526,6 +1546,109 @@ const BrandManagement = () => {
         {form.logo && <img src={form.logo} alt="Preview" className="h-12 object-contain bg-gray-50 rounded-xl mb-4 border" />}
         <button onClick={handleCreate} className="w-full bg-[#4318FF] text-white font-black py-4 rounded-2xl hover:bg-indigo-700 shadow-lg shadow-indigo-100 transition cursor-pointer">
           THÊM HÃNG
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// ====================================================================
+// 9. QUẢN LÝ BANNER (SLIDER)
+// ====================================================================
+const BannerManagement = () => {
+  const [banners, setBanners] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState({ imageUrl: '', linkUrl: '', isActive: true });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => { loadBanners(); }, []);
+
+  const loadBanners = async () => {
+    setLoading(true);
+    try {
+      const data = await getAllBanners();
+      setBanners(data.result || []);
+    } catch (err) { console.error("Lỗi:", err); }
+    finally { setLoading(false); }
+  };
+
+  const handleCreate = async () => {
+    if (!form.imageUrl) return alert('Hãy tải ảnh Banner lên!');
+    setIsSubmitting(true);
+    try {
+      await createBanner({ imageUrl: form.imageUrl, linkUrl: form.linkUrl, isActive: form.isActive });
+      alert('Tạo banner thành công!');
+      setForm({ imageUrl: '', linkUrl: '', isActive: true });
+      loadBanners();
+    } catch (err) { alert(err.message || 'Lỗi!'); }
+    finally { setIsSubmitting(false); }
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm('Xóa banner này vĩnh viễn?')) return;
+    try {
+      await deleteBanner(id);
+      loadBanners();
+    } catch (err) { alert(err.message || 'Lỗi xóa!'); }
+  };
+
+  const handleToggle = async (id) => {
+    try {
+      await toggleBanner(id);
+      loadBanners();
+    } catch (err) { alert(err.message || 'Lỗi toggle!'); }
+  };
+
+  return (
+    <div className="flex gap-8">
+      <div className="w-2/3 bg-white rounded-3xl shadow-sm p-8">
+        <h3 className="text-xl font-bold mb-6">Tất cả Banner hiện tại</h3>
+        {loading ? <p>Đang tải...</p> : (
+          <div className="space-y-4">
+            {banners.map(b => (
+              <div key={b.id} className="border border-gray-100 rounded-2xl p-4 flex gap-6 items-center">
+                <div className="w-48 h-20 bg-gray-50 rounded-xl overflow-hidden shrink-0 border relative">
+                  <img src={b.imageUrl} alt="banner" className="w-full h-full object-cover" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-xs text-gray-500 mb-1">ID: #{b.id} • Tới link: <span className="text-blue-500">{b.linkUrl || 'Không'}</span></p>
+                  <p className="text-[10px] text-gray-400">Đã tạo: {new Date(b.createdAt).toLocaleString('vi-VN')}</p>
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <button onClick={() => handleDelete(b.id)} className="text-xs font-bold text-red-500 hover:underline">Xóa vĩnh viễn</button>
+                </div>
+              </div>
+            ))}
+            {banners.length === 0 && <p className="text-center text-gray-400 py-8">Chưa có banner nào được tạo.</p>}
+          </div>
+        )}
+      </div>
+
+      <div className="w-1/3 bg-white rounded-3xl shadow-sm p-8 h-fit">
+        <h3 className="text-xl font-bold mb-6">Thêm Banner thiết kế</h3>
+
+        <div>
+          <label className="text-[10px] font-black text-[#A3AED0] uppercase block mb-1">Upload Ảnh (25:9)</label>
+          <input type="file" accept="image/*" onChange={async (e) => {
+            if (e.target.files[0]) {
+              setIsSubmitting(true);
+              const res = await uploadImage(e.target.files[0]);
+              setForm({ ...form, imageUrl: res.result });
+              setIsSubmitting(false);
+            }
+          }} className="w-full bg-[#f4f7fe] rounded-xl p-2 outline-none text-sm mb-2" />
+        </div>
+        {form.imageUrl && <img src={form.imageUrl} alt="Preview" className="w-full aspect-[25/9] object-cover rounded-xl mb-4 border" />}
+
+        <div>
+          <label className="text-[10px] font-black text-[#A3AED0] uppercase block mb-1">Đích đến khi click (Tùy chọn)</label>
+          <input type="text" placeholder="ID Sản phẩm (VD: 15) hoặc Link (http...)" value={form.linkUrl} onChange={e => setForm({ ...form, linkUrl: e.target.value })}
+            className="w-full bg-[#f4f7fe] rounded-xl p-3 outline-none mb-4 font-bold border border-transparent focus:border-[#4318FF]" />
+        </div>
+
+
+        <button disabled={isSubmitting} onClick={handleCreate} className="w-full bg-[#4318FF] text-white font-black py-4 rounded-2xl hover:bg-indigo-700 shadow-lg shadow-indigo-100 transition cursor-pointer disabled:opacity-50">
+          {isSubmitting ? 'ĐANG XỬ LÝ...' : 'THÊM BANNER'}
         </button>
       </div>
     </div>

@@ -109,6 +109,18 @@ export const uploadGallery = (productId, files) => {
   }).then(res => res.json());
 };
 
+// Generic Upload 1 Image (Dùng cho Avatar, Ảnh sản phẩm, URL, v.v...)
+export const uploadImage = (file) => {
+  const token = localStorage.getItem("token");
+  const formData = new FormData();
+  formData.append("file", file);
+  return fetch(`${BASE_URL}/upload/image`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  }).then(res => res.json());
+};
+
 // ============================================================
 // 2. BRAND API
 // ============================================================
@@ -131,7 +143,6 @@ export const deleteBrand = (id) => {
 // ============================================================
 // 3. CART API
 // ============================================================
-
 export const getCart = () => {
   return fetchWithAuth("/cart/my-cart");
 };
@@ -367,6 +378,40 @@ export const setDefaultAddress = (id) => {
 
 export const deleteAddress = (id) => {
   return fetchWithAuth(`/addresses/delete/${id}`, { method: "DELETE" });
+};
+
+// ============================================================
+// 6.5. BANNER API
+// ============================================================
+
+export const getActiveBanners = () => {
+  return fetch(`${BASE_URL}/banners/active`).then(res => res.json());
+};
+
+export const getAllBanners = () => {
+  return fetchWithAuth("/banners/all");
+};
+
+export const createBanner = (bannerData) => {
+  return fetchWithAuth("/banners", {
+    method: "POST",
+    body: JSON.stringify(bannerData)
+  });
+};
+
+export const updateBanner = (id, bannerData) => {
+  return fetchWithAuth(`/banners/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(bannerData)
+  });
+};
+
+export const deleteBanner = (id) => {
+  return fetchWithAuth(`/banners/${id}`, { method: "DELETE" });
+};
+
+export const toggleBanner = (id) => {
+  return fetchWithAuth(`/banners/${id}/toggle`, { method: "PATCH" });
 };
 
 // ============================================================
