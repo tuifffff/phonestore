@@ -4,6 +4,38 @@ import {
   getMyAddresses, addAddress, updateAddress, deleteAddress, setDefaultAddress 
 } from '../api/api';
 
+const PROVINCES_API = 'https://provinces.open-api.vn/api/v2';
+
+// Hook địa chỉ 2 cấp (API v2 không còn quận/huyện sau cải cách 2025)
+const useAddressDropdowns = () => {
+  const [provinces, setProvinces] = useState([]);
+  const [wards, setWards] = useState([]);
+  const [selProvince, setSelProvince] = useState(null);
+  const [selWard, setSelWard] = useState(null);
+  const [loadingP, setLoadingP] = useState(false);
+  const [loadingW, setLoadingW] = useState(false);
+
+  useEffect(() => {
+    setLoadingP(true);
+    fetch(`${PROVINCES_API}/?depth=1`)
+      .then(r => r.json()).then(d => setProvinces(Array.isArray(d) ? d : []))
+      .catch(() => setProvinces([])).finally(() => setLoadingP(false));
+  }, []);
+
+  useEffect(() => {
+    if (!selProvince) { setWards([]); setSelWard(null); return; }
+    setLoadingW(true); setWards([]); setSelWard(null);
+    fetch(`${PROVINCES_API}/p/${selProvince.code}?depth=2`)
+      .then(r => r.json()).then(d => setWards(d.wards || []))
+      .catch(() => setWards([])).finally(() => setLoadingW(false));
+  }, [selProvince]);
+
+  const reset = () => { setSelProvince(null); setSelWard(null); setWards([]); };
+
+  return { provinces, wards, selProvince, setSelProvince, selWard, setSelWard, loadingP, loadingW, reset };
+};
+
+
 const ProfilePage = ({ user, onBack }) => {
   const [activeTab, setActiveTab] = useState('profile'); // 'profile' | 'address'
 
@@ -24,11 +56,14 @@ const ProfilePage = ({ user, onBack }) => {
   const [passwordData, setPasswordData] = useState({ oldPassword: '', newPassword: '', confirmPassword: '' });
   const fileInputRef = useRef(null);
 
+  // --- Address Hook ---
+  const addrDrop = useAddressDropdowns();
+
   // --- Address States ---
   const [addresses, setAddresses] = useState([]);
   const [showAddressForm, setShowAddressForm] = useState(false);
   const [editingAddressId, setEditingAddressId] = useState(null);
-  const [addressData, setAddressData] = useState({ street: '', district: '', city: '', isDefault: false });
+  const [addressData, setAddressData] = useState({ street: '', isDefault: false });
 
   // Init fetch
   useEffect(() => {
@@ -118,16 +153,25 @@ const ProfilePage = ({ user, onBack }) => {
   // --- Address Handlers ---
   const handleSaveAddress = async (e) => {
     e.preventDefault();
-    if (!addressData.street || !addressData.district || !addressData.city) return alert("Vui lòng nhập đầy đủ thông tin!");
+    if (!addressData.street) return alert("Vui lòng nhập số nhà, tên đường!");
+    if (!addrDrop.selProvince) return alert("Vui lòng chọn Tỉnh/Thành phố!");
+    if (!addrDrop.selWard) return alert("Vui lòng chọn Phường/Xã!");
+    const payload = {
+      street: addressData.street,
+      district: addrDrop.selWard.name,    // Phường/Xã -> map vào trường district
+      city: addrDrop.selProvince.name,    // Tỉnh/TP -> map vào trường city
+      isDefault: addressData.isDefault,
+    };
     try {
       if (editingAddressId) {
-        await updateAddress(editingAddressId, addressData);
+        await updateAddress(editingAddressId, payload);
         alert("Cập nhật địa chỉ thành công!");
       } else {
-        await addAddress(addressData);
-        alert("Thêm địa chỉ thành công!");
+        await addAddress(payload);
+        alert("Đã thêm địa chỉ mới!");
       }
       setShowAddressForm(false);
+      addrDrop.reset();
       loadAddresses();
     } catch (err) {
       alert(err.message || "Có lỗi xảy ra");
@@ -288,7 +332,7 @@ const ProfilePage = ({ user, onBack }) => {
             <div className="flex justify-between items-center mb-8">
               <h2 className="text-xl font-black uppercase text-gray-800">Danh sách địa chỉ</h2>
               <button 
-                onClick={() => { setAddressData({ street: '', district: '', city: '', isDefault: false }); setEditingAddressId(null); setShowAddressForm(true); }}
+                onClick={() => { setAddressData({ street: '', isDefault: false }); setEditingAddressId(null); addrDrop.reset(); setShowAddressForm(true); }}
                 className="bg-[#058a81] text-white px-6 py-3 rounded-xl font-bold hover:bg-[#046e67] transition cursor-pointer shadow-lg shadow-[#058a81]/20"
               >
                 + THÊM ĐỊA CHỈ
@@ -298,11 +342,60 @@ const ProfilePage = ({ user, onBack }) => {
             {showAddressForm && (
               <form onSubmit={handleSaveAddress} className="mb-8 p-6 bg-gray-50 border border-gray-200 rounded-2xl space-y-4">
                 <h3 className="font-bold text-gray-800 mb-4">{editingAddressId ? 'Sửa địa chỉ' : 'Địa chỉ mới'}</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <input required placeholder="Tỉnh / Thành phố" value={addressData.city} onChange={e => setAddressData({...addressData, city: e.target.value})} className="p-4 rounded-xl border border-gray-200 outline-none focus:border-[#058a81]" />
-                  <input required placeholder="Quận / Huyện" value={addressData.district} onChange={e => setAddressData({...addressData, district: e.target.value})} className="p-4 rounded-xl border border-gray-200 outline-none focus:border-[#058a81]" />
-                  <input required placeholder="Đường / Số nhà" value={addressData.street} onChange={e => setAddressData({...addressData, street: e.target.value})} className="p-4 rounded-xl border border-gray-200 outline-none focus:border-[#058a81]" />
+                
+                {/* 2 Dropdown: Tỉnh + Phường/Xã */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Tỉnh / Thành phố *</label>
+                    <div className="relative">
+                      <select
+                        value={addrDrop.selProvince?.code || ''}
+                        onChange={e => addrDrop.setSelProvince(addrDrop.provinces.find(x => x.code === Number(e.target.value)) || null)}
+                        disabled={addrDrop.loadingP}
+                        className="w-full p-4 rounded-xl border border-gray-200 outline-none focus:border-[#058a81] appearance-none bg-white pr-10 cursor-pointer"
+                      >
+                        <option value="">{addrDrop.loadingP ? '⏳ Đang tải...' : '-- Chọn Tỉnh/TP --'}</option>
+                        {addrDrop.provinces.map(p => <option key={p.code} value={p.code}>{p.name}</option>)}
+                      </select>
+                      <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 text-xs">▼</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Phường / Xã *</label>
+                    <div className="relative">
+                      <select
+                        value={addrDrop.selWard?.code || ''}
+                        onChange={e => addrDrop.setSelWard(addrDrop.wards.find(x => x.code === Number(e.target.value)) || null)}
+                        disabled={!addrDrop.selProvince || addrDrop.loadingW}
+                        className={`w-full p-4 rounded-xl border border-gray-200 outline-none focus:border-[#058a81] appearance-none bg-white pr-10 ${!addrDrop.selProvince ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                      >
+                        <option value="">{addrDrop.loadingW ? '⏳ Đang tải...' : (addrDrop.selProvince ? '-- Chọn Phường/Xã --' : '-- Chọn Tỉnh trước --')}</option>
+                        {addrDrop.wards.map(w => <option key={w.code} value={w.code}>{w.name}</option>)}
+                      </select>
+                      <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 text-xs">▼</span>
+                    </div>
+                  </div>
                 </div>
+
+                {/* Số nhà, đường */}
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Số nhà, Tên đường *</label>
+                  <input 
+                    required 
+                    placeholder="VD: 123 Nguyễn Huệ" 
+                    value={addressData.street} 
+                    onChange={e => setAddressData({...addressData, street: e.target.value})} 
+                    className="w-full p-4 rounded-xl border border-gray-200 outline-none focus:border-[#058a81]" 
+                  />
+                </div>
+
+                {/* Preview địa chỉ */}
+                {(addrDrop.selProvince || addressData.street) && (
+                  <div className="p-3 bg-[#058a81]/5 border border-[#058a81]/20 rounded-xl text-sm text-gray-700 font-medium">
+                    📍 {[addressData.street, addrDrop.selWard?.name, addrDrop.selProvince?.name].filter(Boolean).join(', ')}
+                  </div>
+                )}
+
                 {!editingAddressId && (
                   <label className="flex items-center gap-2 cursor-pointer mt-2 text-sm font-bold text-gray-600">
                     <input type="checkbox" checked={addressData.isDefault} onChange={e => setAddressData({...addressData, isDefault: e.target.checked})} className="w-5 h-5 accent-[#058a81]" />
@@ -310,8 +403,8 @@ const ProfilePage = ({ user, onBack }) => {
                   </label>
                 )}
                 <div className="flex gap-4 items-center">
-                  <button type="submit" className="bg-orange-500 text-white font-bold py-3 px-8 rounded-xl hover:bg-orange-600">Lưu thông tin</button>
-                  <button type="button" onClick={() => setShowAddressForm(false)} className="text-gray-400 font-bold hover:text-red-500">Hủy</button>
+                  <button type="submit" className="bg-orange-500 text-white font-bold py-3 px-8 rounded-xl hover:bg-orange-600 cursor-pointer">Đặt làm địa chỉ</button>
+                  <button type="button" onClick={() => { setShowAddressForm(false); addrDrop.reset(); }} className="text-gray-400 font-bold hover:text-red-500 cursor-pointer">Hủy</button>
                 </div>
               </form>
             )}

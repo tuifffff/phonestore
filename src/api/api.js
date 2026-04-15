@@ -97,6 +97,14 @@ export const deleteProduct = (id) => {
   return fetchWithAuth(`/products/${id}`, { method: "DELETE" });
 };
 
+// Admin: Cập nhật version (giá, kho, màu, bộ nhớ)
+export const updateVersion = (versionId, versionData) => {
+  return fetchWithAuth(`/products/versions/${versionId}`, {
+    method: "PATCH",
+    body: JSON.stringify(versionData),
+  });
+};
+
 // Admin: Upload ảnh gallery 360 (MultipartFile)
 export const uploadGallery = (productId, files) => {
   const token = localStorage.getItem("token");
@@ -440,3 +448,18 @@ export const getRevenue = (month, year) => {
 export const getTopSelling = () => {
   return fetchWithAuth("/statistics/top-selling");
 };
+
+export const getYearlyRevenue = (year) => {
+  return fetchWithAuth(`/statistics/yearly-revenue?year=${year}`);
+};
+
+export const getDailyRevenue = (month, year) => {
+  return fetchWithAuth(`/statistics/daily-revenue?month=${month}&year=${year}`);
+};
+
+// ============================================================
+// 9. MEMBERSHIP API
+// ============================================================
+
+export const getMyMembership = () => fetchWithAuth('/membership/my');
+export const getMembershipByUser = (userId) => fetchWithAuth(`/membership/user/${userId}`);

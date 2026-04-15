@@ -22,20 +22,33 @@ const LoginPage = ({ onBack, onNavigateToRegister, onAuthSuccess,onNavigateToFor
   // 1. Lưu Token (Chìa khóa)
   localStorage.setItem("token", data.result.token);
   
-  // 2. Lưu ID thật (Để sau này lấy đúng giỏ hàng của người này)
+  // 2. Lưu ID thật
   localStorage.setItem("userID", data.result.id); 
 
-  // 3. Tạo object User để hiển thị lên Header
+  // 3. Parse permissions từ JWT token (scope claim) — đáng tin hơn response field
+  let permissions = data.result.permissions || [];
+  if (!permissions.length) {
+    try {
+      const payload = JSON.parse(atob(data.result.token.split('.')[1]));
+      const scope = payload.scope || '';
+      permissions = scope.split(' ').filter(s => s.length > 0 && !s.startsWith('ROLE_'));
+    } catch (e) {
+      console.warn('Không parse được JWT scope:', e);
+    }
+  }
+
+  // 4. Tạo object User (có permissions để Dynamic Sidebar hoạt động)
   const userObj = { 
     id: data.result.id,
     username: data.result.username,
-    role: data.result.role
+    role: data.result.role,
+    permissions,
   };
   localStorage.setItem("currentUser", JSON.stringify(userObj));
 
   alert(`Chào mừng ${data.result.username} đã quay trở lại!`);
   
-  // 4. Báo cho App.jsx biết để đổi trang
+  // 5. Báo cho App.jsx biết để đổi trang
   onAuthSuccess(userObj); 
 } else {
         alert("Sai tài khoản hoặc mật khẩu!");

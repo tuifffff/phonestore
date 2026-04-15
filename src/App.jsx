@@ -98,7 +98,7 @@ function App() {
 
       const params = {
         page,
-        size: 20,
+
         sortBy,
         sortDir,
         keyword: searchTerm || undefined,
@@ -179,9 +179,23 @@ function App() {
 
     if (savedUser && token) {
       const userData = JSON.parse(savedUser);
+
+      // Nếu user cũ chưa có permissions → parse từ JWT token
+      if (!userData.permissions || userData.permissions.length === 0) {
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          const scope = payload.scope || '';
+          userData.permissions = scope.split(' ').filter(s => s.length > 0 && !s.startsWith('ROLE_'));
+          // Lưu lại để lần sau không cần parse nữa
+          localStorage.setItem('currentUser', JSON.stringify(userData));
+        } catch (e) {
+          userData.permissions = [];
+        }
+      }
+
       setUser(userData);
       loadCartFromAPI();
-      // Nếu là ADMIN thì giữ lại trang admin khi F5
+      // Nếu là ADMIN / WAREHOUSE_STAFF → giữ trang admin khi F5
       if (['ADMIN', 'WAREHOUSE_STAFF'].includes(userData.role)) {
         setCurrentPage('admin');
       }
@@ -289,7 +303,7 @@ function App() {
   const handleAuthSuccess = (userData) => {
     setUser(userData);
     loadCartFromAPI(); // Load giỏ hàng từ DB
-    if (userData.role === 'ADMIN') {
+    if (['ADMIN', 'WAREHOUSE_STAFF'].includes(userData.role)) {
       setCurrentPage('admin');
     } else {
       setCurrentPage('home');
@@ -495,7 +509,7 @@ function App() {
                     {[
                       { label: 'Tất cả', value: null },
                       { label: 'Còn hàng', value: true },
-                      { label: 'Hết hàng', value: false },
+
                     ].map((opt) => (
                       <button
                         key={String(opt.value)}

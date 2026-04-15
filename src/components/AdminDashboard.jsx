@@ -4,25 +4,124 @@ import {
   getBrands, createBrand, deleteBrand,
   getAllOrders, updateOrderStatus, rejectOrder, confirmPayment, countPendingOrders, getOrderDetail, exportInvoice,
   getAllUsers, updateUserRole, revokeUserRole, getRoles, createRole, deleteRole, getPermissions, createPermission,
-  getRevenue, getTopSelling,
-  uploadGallery, uploadImage,
+  getRevenue, getTopSelling, getYearlyRevenue, getDailyRevenue,
+  uploadGallery, uploadImage, updateVersion, getProductDetail,
   getMyInfo, updateMyInfo, changePassword,
   getAllBanners, createBanner, deleteBanner, toggleBanner,
+  getMembershipByUser,
 } from '../api/api';
 
 // ====================================================================
 // ADMIN DASHBOARD - TOÀN BỘ DÙNG API THẬT
 // ====================================================================
+// ── Permissions theo DB (từ bảng role_permission):
+// ADMIN: APPROVE_ORDER, CREATE_PRODUCT, DELETE_PRODUCT, UPDATE_PRODUCT, VIEW_ALL_ORDERS, VIEW_ORDER, VIEW_REPORT
+// WAREHOUSE_STAFF: VIEW_ALL_ORDERS
+// permission: null = LUÔN hiển thị (không cần quyền gì)
+const MENU_CONFIG = [
+  {
+    id: 'dashboard', label: 'Tổng quan', icon: '📊',
+    permission: 'VIEW_REPORT',                    // Chỉ ADMIN
+  },
+  {
+    id: 'orders', label: 'Đơn hàng', icon: '🛒',
+    permission: 'VIEW_ALL_ORDERS', badge: true,   // ADMIN + WAREHOUSE_STAFF
+  },
+  {
+    id: 'products-group', label: 'Sản phẩm', icon: '📦',
+    permission: null,
+    children: [
+      { id: 'product-list', label: 'Danh sách Sản Phẩm', permission: 'VIEW_ORDER' },      // ADMIN
+      { id: 'product-upload', label: 'Thêm Sản Phẩm', permission: 'CREATE_PRODUCT' },  // ADMIN
+      { id: 'brand-manage', label: 'Quản lý Hãng', permission: 'CREATE_PRODUCT' },  // ADMIN
+      { id: 'banner-manage', label: 'Quản lý Banner', permission: 'CREATE_PRODUCT' },  // ADMIN
+    ],
+  },
+  {
+    id: 'users-group', label: 'Người dùng', icon: '👥',
+    permission: null,
+    children: [
+      { id: 'customers', label: 'Danh sách Khách hàng', permission: 'VIEW_ALL_ORDERS' }, // ADMIN + WAREHOUSE_STAFF
+      { id: 'role-manage', label: 'Quản lý Quyền', permission: 'VIEW_REPORT' },    // Chỉ ADMIN
+      { id: 'permission-manage', label: 'Quản lý Tính năng', permission: 'VIEW_REPORT' },    // Chỉ ADMIN
+    ],
+  },
+  {
+    id: 'admin-profile', label: 'Tài khoản', icon: '👤',
+    permission: null, // Luôn hiện
+  },
+];
+
 const AdminDashboard = ({ onLogout, user }) => {
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState('');
   const [isProductsMenuOpen, setIsProductsMenuOpen] = useState(true);
   const [isUsersMenuOpen, setIsUsersMenuOpen] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
+  const [selectedAdminProductId, setSelectedAdminProductId] = useState(null);
 
-  // Load badge đơn chờ duyệt
+  // Lấy permissions từ user object (đã lưu trong localStorage lúc login)
+  const permissions = user?.permissions || [];
+  const hasPermission = (perm) => !perm || permissions.includes(perm);
+
+  // Tính menu con hiển thị được
+  const visibleChildren = (children) => children?.filter(c => hasPermission(c.permission)) || [];
+
+  // Tab mặc định: chạy mỗi khi user thay đổi
+  // Chọn tab đầu tiên user có quyền. Không override nếu đang ở tab hợp lệ.
   useEffect(() => {
-    countPendingOrders().then(data => setPendingCount(data.result || 0)).catch(() => { });
+    const perms = user?.permissions || [];
+    if (!perms.length) return; // Chưa có permissions → đợi
+
+    const check = (perm) => !perm || perms.includes(perm);
+
+    // Kiểm tra tab hiện tại còn hợp lệ không (ngoại trừ admin-profile là fallback)
+    if (activeTab && activeTab !== 'admin-profile') {
+      const stillValid = MENU_CONFIG.some(item =>
+        item.children
+          ? item.children.some(c => c.id === activeTab && check(c.permission))
+          : item.id === activeTab && check(item.permission)
+      );
+      if (stillValid) return; // Tab hiện tại ok, giữ nguyên
+    }
+
+    // Tìm tab đầu tiên có quyền (bỏ qua admin-profile — đó là fallback cuối)
+    for (const item of MENU_CONFIG) {
+      if (item.id === 'admin-profile') continue;
+      if (item.children) {
+        const first = item.children.find(c => check(c.permission));
+        if (first) { setActiveTab(first.id); return; }
+      } else if (check(item.permission)) {
+        setActiveTab(item.id); return;
+      }
+    }
+    // Không có tab nào khác → fallback về Tài khoản
+    setActiveTab('admin-profile');
+  }, [user]);
+
+  useEffect(() => {
+    if (hasPermission('VIEW_ALL_ORDERS')) {
+      countPendingOrders().then(data => setPendingCount(data.result || 0)).catch(() => { });
+    }
   }, [activeTab]);
+
+  const handleViewProductDetail = (productId) => {
+    setSelectedAdminProductId(productId);
+    setActiveTab('product-detail');
+  };
+
+  const NavItem = ({ id, label, icon, badge }) => {
+    const active = activeTab === id;
+    return (
+      <div onClick={() => setActiveTab(id)}
+        className={`p-4 rounded-2xl cursor-pointer flex items-center gap-4 transition-all ${active ? 'bg-[#4318FF] text-white font-bold shadow-lg shadow-indigo-100' : 'text-[#A3AED0] hover:bg-gray-50'}`}>
+        <span className="text-xl">{icon}</span>
+        <span className="flex-1">{label}</span>
+        {badge && pendingCount > 0 && (
+          <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full">{pendingCount}</span>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="flex min-h-screen bg-[#f8f9fa] font-sans text-[#2b3674]">
@@ -32,57 +131,49 @@ const AdminDashboard = ({ onLogout, user }) => {
           <span className="bg-[#058a81] text-white p-1 rounded px-3">PH</span> Dashboard
         </div>
 
+        {/* User badge */}
+        <div className="mb-6 px-4 py-3 bg-gray-50 rounded-2xl">
+          <p className="text-xs text-[#A3AED0] font-bold uppercase">Đăng nhập với tư cách</p>
+          <p className="font-black text-sm text-[#2b3674] mt-0.5">{user?.username}</p>
+          <span className={`text-[10px] font-black px-2 py-0.5 rounded-full mt-1 inline-block ${user?.role === 'ADMIN' ? 'bg-indigo-100 text-indigo-600' :
+            user?.role === 'WAREHOUSE_STAFF' ? 'bg-orange-100 text-orange-600' :
+              'bg-gray-100 text-gray-500'
+            }`}>{user?.role}</span>
+        </div>
+
         <nav className="flex-1 space-y-2">
-          <div onClick={() => setActiveTab('dashboard')}
-            className={`p-4 rounded-2xl cursor-pointer flex items-center gap-4 transition-all ${activeTab === 'dashboard' ? 'bg-[#4318FF] text-white font-bold shadow-lg shadow-indigo-100' : 'text-[#A3AED0] hover:bg-gray-50'}`}>
-            <span className="text-xl">📊</span> Tổng quan
-          </div>
-
-          <div onClick={() => setActiveTab('orders')}
-            className={`p-4 rounded-2xl cursor-pointer flex items-center gap-4 transition-all ${activeTab === 'orders' ? 'bg-[#4318FF] text-white font-bold shadow-lg shadow-indigo-100' : 'text-[#A3AED0] hover:bg-gray-50'}`}>
-            <span className="text-xl">🛒</span> Đơn hàng
-            {pendingCount > 0 && (
-              <span className="ml-auto bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full">{pendingCount}</span>
-            )}
-          </div>
-
-          {/* Menu Products dropdown */}
-          <div>
-            <div onClick={() => setIsProductsMenuOpen(!isProductsMenuOpen)}
-              className={`p-4 rounded-2xl cursor-pointer flex items-center justify-between transition-all ${activeTab.includes('product') || activeTab.includes('brand') ? 'text-[#4318FF] font-bold' : 'text-[#A3AED0] hover:bg-gray-50'}`}>
-              <div className="flex items-center gap-4"><span className="text-xl">📦</span> Sản phẩm</div>
-              <span className={`text-xs transition-transform ${isProductsMenuOpen ? 'rotate-180' : ''}`}>▼</span>
-            </div>
-            {isProductsMenuOpen && (
-              <div className="ml-12 mt-2 space-y-2 border-l-2 border-gray-100 pl-4">
-                <p onClick={() => setActiveTab('product-list')} className={`cursor-pointer py-2 text-sm ${activeTab === 'product-list' ? 'text-[#4318FF] font-bold' : 'text-[#A3AED0] hover:text-[#4318FF]'}`}>Danh sách Sản Phẩm</p>
-                <p onClick={() => setActiveTab('product-upload')} className={`cursor-pointer py-2 text-sm ${activeTab === 'product-upload' ? 'text-[#4318FF] font-bold' : 'text-[#A3AED0] hover:text-[#4318FF]'}`}>Thêm Sản Phẩm</p>
-                <p onClick={() => setActiveTab('brand-manage')} className={`cursor-pointer py-2 text-sm ${activeTab === 'brand-manage' ? 'text-[#4318FF] font-bold' : 'text-[#A3AED0] hover:text-[#4318FF]'}`}>Quản lý Hãng</p>
-                <p onClick={() => setActiveTab('banner-manage')} className={`cursor-pointer py-2 text-sm ${activeTab === 'banner-manage' ? 'text-[#4318FF] font-bold' : 'text-[#A3AED0] hover:text-[#4318FF]'}`}>Quản lý Banner</p>
-              </div>
-            )}
-          </div>
-
-          {/* Menu Users dropdown */}
-          <div>
-            <div onClick={() => setIsUsersMenuOpen(!isUsersMenuOpen)}
-              className={`p-4 rounded-2xl cursor-pointer flex items-center justify-between transition-all ${activeTab.includes('customer') || activeTab.includes('role') ? 'text-[#4318FF] font-bold' : 'text-[#A3AED0] hover:bg-gray-50'}`}>
-              <div className="flex items-center gap-4"><span className="text-xl">👥</span> Người dùng</div>
-              <span className={`text-xs transition-transform ${isUsersMenuOpen ? 'rotate-180' : ''}`}>▼</span>
-            </div>
-            {isUsersMenuOpen && (
-              <div className="ml-12 mt-2 space-y-2 border-l-2 border-gray-100 pl-4">
-                <p onClick={() => setActiveTab('customers')} className={`cursor-pointer py-2 text-sm ${activeTab === 'customers' ? 'text-[#4318FF] font-bold' : 'text-[#A3AED0] hover:text-[#4318FF]'}`}>Danh sách Khách hàng</p>
-                <p onClick={() => setActiveTab('role-manage')} className={`cursor-pointer py-2 text-sm ${activeTab === 'role-manage' ? 'text-[#4318FF] font-bold' : 'text-[#A3AED0] hover:text-[#4318FF]'}`}>Quản lý Quyền</p>
-                <p onClick={() => setActiveTab('permission-manage')} className={`cursor-pointer py-2 text-sm ${activeTab === 'permission-manage' ? 'text-[#4318FF] font-bold' : 'text-[#A3AED0] hover:text-[#4318FF]'}`}>Quản lý Tính năng</p>
-              </div>
-            )}
-          </div>
-
-          <div onClick={() => setActiveTab('admin-profile')}
-            className={`p-4 rounded-2xl cursor-pointer flex items-center gap-4 transition-all ${activeTab === 'admin-profile' ? 'bg-[#4318FF] text-white font-bold shadow-lg shadow-indigo-100' : 'text-[#A3AED0] hover:bg-gray-50'}`}>
-            <span className="text-xl">👤</span> Tài khoản
-          </div>
+          {MENU_CONFIG.map(item => {
+            // Nhóm dropdown có children
+            if (item.children) {
+              const visible = visibleChildren(item.children);
+              if (visible.length === 0) return null;
+              const isGroupOpen = item.id === 'products-group' ? isProductsMenuOpen : isUsersMenuOpen;
+              const setGroupOpen = item.id === 'products-group' ? setIsProductsMenuOpen : setIsUsersMenuOpen;
+              const isGroupActive = visible.some(c => activeTab === c.id || activeTab === 'product-detail');
+              return (
+                <div key={item.id}>
+                  <div onClick={() => setGroupOpen(!isGroupOpen)}
+                    className={`p-4 rounded-2xl cursor-pointer flex items-center justify-between transition-all ${isGroupActive ? 'text-[#4318FF] font-bold' : 'text-[#A3AED0] hover:bg-gray-50'}`}>
+                    <div className="flex items-center gap-4"><span className="text-xl">{item.icon}</span>{item.label}</div>
+                    <span className={`text-xs transition-transform ${isGroupOpen ? 'rotate-180' : ''}`}>▼</span>
+                  </div>
+                  {isGroupOpen && (
+                    <div className="ml-12 mt-2 space-y-2 border-l-2 border-gray-100 pl-4">
+                      {visible.map(child => (
+                        <p key={child.id} onClick={() => setActiveTab(child.id)}
+                          className={`cursor-pointer py-2 text-sm ${activeTab === child.id ? 'text-[#4318FF] font-bold' : 'text-[#A3AED0] hover:text-[#4318FF]'}`}>
+                          {child.label}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            }
+            // Menu đơn
+            if (!hasPermission(item.permission)) return null;
+            return <NavItem key={item.id} {...item} />;
+          })}
         </nav>
 
         <button onClick={onLogout} className="mt-auto bg-red-50 text-red-600 font-bold p-4 rounded-2xl hover:bg-red-100 transition cursor-pointer">Đăng xuất</button>
@@ -92,15 +183,22 @@ const AdminDashboard = ({ onLogout, user }) => {
       <main className="flex-1 p-10 overflow-y-auto h-screen">
         <header className="flex justify-between items-center mb-8">
           <div>
-            <p className="text-sm text-[#707EAE]">Admin / {activeTab.replace('-', ' ')}</p>
-            <h2 className="text-3xl font-bold capitalize">{activeTab.replace('-', ' ')}</h2>
+            <p className="text-sm text-[#707EAE]">Admin / {activeTab.replace(/-/g, ' ')}</p>
+            <h2 className="text-3xl font-bold capitalize">{activeTab.replace(/-/g, ' ')}</h2>
           </div>
         </header>
 
         {activeTab === 'dashboard' && <DashboardOverview />}
         {activeTab === 'orders' && <OrderManagement />}
-        {activeTab === 'product-list' && <ProductList onNavigateToUpload={() => setActiveTab('product-upload')} />}
+        {activeTab === 'product-list' && <ProductList onNavigateToUpload={() => setActiveTab('product-upload')} onViewDetail={handleViewProductDetail} />}
         {activeTab === 'product-upload' && <ProductUpload onSuccess={() => setActiveTab('product-list')} />}
+        {activeTab === 'product-detail' && selectedAdminProductId && (
+          <ProductDetailAdmin
+            productId={selectedAdminProductId}
+            onBack={() => { setSelectedAdminProductId(null); setActiveTab('product-list'); }}
+            onDeleted={() => { setSelectedAdminProductId(null); setActiveTab('product-list'); }}
+          />
+        )}
         {activeTab === 'customers' && <CustomerManagement />}
         {activeTab === 'role-manage' && <RoleManagement />}
         {activeTab === 'permission-manage' && <PermissionManagement />}
@@ -119,24 +217,30 @@ const DashboardOverview = () => {
   const [revenue, setRevenue] = useState(null);
   const [topSelling, setTopSelling] = useState([]);
   const [pendingCount, setPendingCount] = useState(0);
+  const [yearlyData, setYearlyData] = useState({});
+  const [dailyData, setDailyData] = useState({});
   const [loading, setLoading] = useState(true);
+  const [loadingDaily, setLoadingDaily] = useState(false);
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
 
   useEffect(() => { loadData(); }, [month, year]);
+  useEffect(() => { loadDailyData(); }, [month, year]);
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const [revData, topData, pendData] = await Promise.all([
+      const [revData, topData, pendData, yearData] = await Promise.all([
         getRevenue(month, year),
         getTopSelling(),
         countPendingOrders(),
+        getYearlyRevenue(year),
       ]);
       setRevenue(revData.result);
       setTopSelling(topData.result || []);
       setPendingCount(pendData.result || 0);
+      setYearlyData(yearData.result || {});
     } catch (err) {
       console.error("Lỗi load dashboard:", err);
     } finally {
@@ -144,7 +248,79 @@ const DashboardOverview = () => {
     }
   };
 
+  const loadDailyData = async () => {
+    setLoadingDaily(true);
+    try {
+      const data = await getDailyRevenue(month, year);
+      setDailyData(data.result || {});
+    } catch (err) {
+      console.error("Lỗi load daily revenue:", err);
+    } finally {
+      setLoadingDaily(false);
+    }
+  };
+
   const formatVND = (val) => val ? Number(val).toLocaleString('vi-VN') + '₫' : '0₫';
+  const formatVNDShort = (val) => {
+    const n = Number(val);
+    if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1) + 'T';
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(0) + 'Tr';
+    if (n >= 1_000) return (n / 1_000).toFixed(0) + 'K';
+    return n.toString();
+  };
+
+  // ── Biểu đồ năm ──
+  const MONTHS = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12'];
+  const chartValues = MONTHS.map((_, i) => Number(yearlyData[i + 1] || 0));
+  const maxVal = Math.max(...chartValues, 1);
+
+  const SVG_W = 700, SVG_H = 200, PAD_L = 55, PAD_B = 30, PAD_T = 20, PAD_R = 20;
+  const plotW = SVG_W - PAD_L - PAD_R;
+  const plotH = SVG_H - PAD_T - PAD_B;
+  const barW = plotW / 12;
+
+  const points = chartValues.map((v, i) => {
+    const x = PAD_L + i * barW + barW / 2;
+    const y = PAD_T + plotH - (v / maxVal) * plotH;
+    return `${x},${y}`;
+  }).join(' ');
+
+  const areaPoints = [
+    `${PAD_L + barW / 2},${PAD_T + plotH}`,
+    ...chartValues.map((v, i) => {
+      const x = PAD_L + i * barW + barW / 2;
+      const y = PAD_T + plotH - (v / maxVal) * plotH;
+      return `${x},${y}`;
+    }),
+    `${PAD_L + 11 * barW + barW / 2},${PAD_T + plotH}`,
+  ].join(' ');
+
+  // ── Biểu đồ ngày ──
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const dailyValues = Array.from({ length: daysInMonth }, (_, i) => Number(dailyData[i + 1] || 0));
+  const maxDailyVal = Math.max(...dailyValues, 1);
+  const D_SVG_W = 800, D_SVG_H = 200, D_PAD_L = 55, D_PAD_B = 30, D_PAD_T = 20, D_PAD_R = 10;
+  const dPlotW = D_SVG_W - D_PAD_L - D_PAD_R;
+  const dPlotH = D_SVG_H - D_PAD_T - D_PAD_B;
+  const dBarW = dPlotW / daysInMonth;
+
+  const dPoints = dailyValues.map((v, i) => {
+    const x = D_PAD_L + i * dBarW + dBarW / 2;
+    const y = D_PAD_T + dPlotH - (v / maxDailyVal) * dPlotH;
+    return `${x},${y}`;
+  }).join(' ');
+
+  const dAreaPoints = [
+    `${D_PAD_L + dBarW / 2},${D_PAD_T + dPlotH}`,
+    ...dailyValues.map((v, i) => {
+      const x = D_PAD_L + i * dBarW + dBarW / 2;
+      const y = D_PAD_T + dPlotH - (v / maxDailyVal) * dPlotH;
+      return `${x},${y}`;
+    }),
+    `${D_PAD_L + (daysInMonth - 1) * dBarW + dBarW / 2},${D_PAD_T + dPlotH}`,
+  ].join(' ');
+
+  const today = now.getDate();
 
   return (
     <div className="space-y-8">
@@ -180,9 +356,148 @@ const DashboardOverview = () => {
           <div className="w-14 h-14 bg-purple-50 rounded-full flex items-center justify-center text-2xl">🏆</div>
           <div>
             <p className="text-sm text-[#A3AED0]">Top SP bán chạy</p>
-            <h3 className="text-2xl font-black text-purple-600">{loading ? '...' : topSelling[0]?.productName || '-'}</h3>
+            <h3 className="text-lg font-black text-purple-600 truncate max-w-[160px]">{loading ? '...' : topSelling[0]?.productName || '-'}</h3>
           </div>
         </div>
+      </div>
+
+      {/* ── BIỂU ĐỒ DOANH THU TỪNG NGÀY TRONG THÁNG ── */}
+      <div className="bg-white rounded-3xl shadow-sm p-8 border border-gray-50">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xl font-bold">📅 Doanh thu từng ngày — Tháng {month}/{year}</h3>
+          <span className="text-sm text-gray-400 font-bold">Đơn vị: VNĐ</span>
+        </div>
+        {loadingDaily ? (
+          <div className="animate-pulse h-[230px] bg-gray-50 rounded-2xl" />
+        ) : (
+          <div className="w-full overflow-x-auto">
+            <svg viewBox={`0 0 ${D_SVG_W} ${D_SVG_H}`} className="w-full min-w-[600px]" style={{ height: 220 }}>
+              <defs>
+                <linearGradient id="gradDay" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#058a81" />
+                  <stop offset="100%" stopColor="#058a81" stopOpacity="0" />
+                </linearGradient>
+              </defs>
+              {/* Grid lines */}
+              {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
+                const y = D_PAD_T + dPlotH - ratio * dPlotH;
+                return (
+                  <g key={i}>
+                    <line x1={D_PAD_L} y1={y} x2={D_SVG_W - D_PAD_R} y2={y} stroke="#f3f4f6" strokeWidth="1" />
+                    <text x={D_PAD_L - 6} y={y + 4} textAnchor="end" fontSize="9" fill="#9ca3af">
+                      {formatVNDShort(maxDailyVal * ratio)}
+                    </text>
+                  </g>
+                );
+              })}
+
+              {/* Area fill */}
+              <polygon points={dAreaPoints} fill="url(#gradDay)" opacity="0.18" />
+              {/* Line */}
+              <polyline points={dPoints} fill="none" stroke="#058a81" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+
+              {/* Dots + labels */}
+              {dailyValues.map((v, i) => {
+                const x = D_PAD_L + i * dBarW + dBarW / 2;
+                const y = D_PAD_T + dPlotH - (v / maxDailyVal) * dPlotH;
+                const isToday = (i + 1) === today && month === (now.getMonth() + 1) && year === now.getFullYear();
+                const showLabel = daysInMonth <= 15 || (i + 1) % 2 === 1; // Hiện label ngày lẻ nếu tháng dài
+                return (
+                  <g key={i}>
+                    {showLabel && (
+                      <text x={x} y={D_SVG_H - 8} textAnchor="middle" fontSize="8"
+                        fill={isToday ? '#058a81' : '#9ca3af'} fontWeight={isToday ? 'bold' : 'normal'}>
+                        {i + 1}
+                      </text>
+                    )}
+                    {v > 0 && (
+                      <circle cx={x} cy={y} r={isToday ? 5 : 3} fill={isToday ? '#058a81' : 'white'} stroke="#058a81" strokeWidth="2" />
+                    )}
+                    {/* Tooltip cho ngày hôm nay hoặc ngày có doanh thu cao nhất */}
+                    {isToday && v > 0 && (
+                      <g>
+                        <rect x={x - 28} y={y - 28} width={56} height={18} rx={5} fill="#058a81" />
+                        <text x={x} y={y - 15} textAnchor="middle" fontSize="8" fill="white" fontWeight="bold">
+                          {formatVNDShort(v)}
+                        </text>
+                      </g>
+                    )}
+                  </g>
+                );
+              })}
+              {/* Đường đáy */}
+              <line x1={D_PAD_L} y1={D_PAD_T + dPlotH} x2={D_SVG_W - D_PAD_R} y2={D_PAD_T + dPlotH} stroke="#e5e7eb" strokeWidth="1" />
+            </svg>
+          </div>
+        )}
+        {/* Tổng kết ngày */}
+        {!loadingDaily && (
+          <div className="mt-4 flex gap-6 text-sm text-gray-500">
+            <span>Tổng ngày có doanh thu: <b className="text-[#058a81]">{dailyValues.filter(v => v > 0).length} ngày</b></span>
+            <span>Ngày cao nhất: <b className="text-[#058a81]">{formatVND(Math.max(...dailyValues))}</b></span>
+          </div>
+        )}
+      </div>
+
+      {/* ── BIỂU ĐỒ DOANH THU 12 THÁNG ── */}
+      <div className="bg-white rounded-3xl shadow-sm p-8 border border-gray-50">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xl font-bold">📈 Doanh thu theo tháng — Năm {year}</h3>
+          <span className="text-sm text-gray-400 font-bold">Đơn vị: VNĐ</span>
+        </div>
+        {loading ? (
+          <div className="animate-pulse h-[230px] bg-gray-50 rounded-2xl" />
+        ) : (
+          <div className="w-full overflow-x-auto">
+            <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} className="w-full min-w-[500px]" style={{ height: 220 }}>
+              <defs>
+                <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#4318FF" />
+                  <stop offset="100%" stopColor="#4318FF" stopOpacity="0" />
+                </linearGradient>
+              </defs>
+              {/* Grid lines */}
+              {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
+                const y = PAD_T + plotH - ratio * plotH;
+                return (
+                  <g key={i}>
+                    <line x1={PAD_L} y1={y} x2={SVG_W - PAD_R} y2={y} stroke="#f3f4f6" strokeWidth="1" />
+                    <text x={PAD_L - 6} y={y + 4} textAnchor="end" fontSize="10" fill="#9ca3af">
+                      {formatVNDShort(maxVal * ratio)}
+                    </text>
+                  </g>
+                );
+              })}
+              {/* Area fill */}
+              <polygon points={areaPoints} fill="url(#grad)" opacity="0.15" />
+              {/* Line */}
+              <polyline points={points} fill="none" stroke="#4318FF" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+              {/* Dots + tháng labels */}
+              {chartValues.map((v, i) => {
+                const x = PAD_L + i * barW + barW / 2;
+                const y = PAD_T + plotH - (v / maxVal) * plotH;
+                const isCurrent = (i + 1) === month;
+                return (
+                  <g key={i}>
+                    <text x={x} y={SVG_H - 8} textAnchor="middle" fontSize="10" fill={isCurrent ? '#4318FF' : '#9ca3af'} fontWeight={isCurrent ? 'bold' : 'normal'}>
+                      {MONTHS[i]}
+                    </text>
+                    <circle cx={x} cy={y} r={isCurrent ? 5 : 3.5} fill={isCurrent ? '#4318FF' : 'white'} stroke="#4318FF" strokeWidth="2" />
+                    {isCurrent && v > 0 && (
+                      <g>
+                        <rect x={x - 28} y={y - 28} width={56} height={18} rx={6} fill="#4318FF" />
+                        <text x={x} y={y - 15} textAnchor="middle" fontSize="9" fill="white" fontWeight="bold">
+                          {formatVNDShort(v)}
+                        </text>
+                      </g>
+                    )}
+                  </g>
+                );
+              })}
+              <line x1={PAD_L} y1={PAD_T + plotH} x2={SVG_W - PAD_R} y2={PAD_T + plotH} stroke="#e5e7eb" strokeWidth="1" />
+            </svg>
+          </div>
+        )}
       </div>
 
       {/* Bảng Top bán chạy */}
@@ -221,6 +536,7 @@ const DashboardOverview = () => {
     </div>
   );
 };
+
 
 // ====================================================================
 // 2. QUẢN LÝ ĐƠN HÀNG - API thực
@@ -489,15 +805,12 @@ const OrderManagement = () => {
 // ====================================================================
 // 3. DANH SÁCH SẢN PHẨM - API thực
 // ====================================================================
-const ProductList = ({ onNavigateToUpload }) => {
+const ProductList = ({ onNavigateToUpload, onViewDetail }) => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
-  const [selectedProduct, setSelectedProduct] = useState(null);
-  const [editForm, setEditForm] = useState({ name: '', description: '', image: '', brandId: '' });
   const [brands, setBrands] = useState([]);
-  const [saving, setSaving] = useState(false);
   const [brandFilter, setBrandFilter] = useState('');
   const [searchKeyword, setSearchKeyword] = useState('');
 
@@ -523,173 +836,391 @@ const ProductList = ({ onNavigateToUpload }) => {
     } catch { }
   };
 
-  const handleSelect = async (product) => {
-    setSelectedProduct(product);
-    // Load chi tiết đầy đủ
-    try {
-      const { getProductDetail } = await import('../api/api');
-      const data = await getProductDetail(product.id);
-      const detail = data.result;
-      setEditForm({
-        name: detail.name || '',
-        description: detail.description || '',
-        image: product.image || '',
-        brandId: brands.find(b => b.name === product.brandName)?.id || '',
-      });
-    } catch {
-      setEditForm({ name: product.name || '', description: '', image: product.image || '', brandId: '' });
-    }
-  };
-
-  const handleSave = async () => {
-    if (!selectedProduct) return;
-    setSaving(true);
-    try {
-      await updateProduct(selectedProduct.id, {
-        name: editForm.name,
-        description: editForm.description,
-        image: editForm.image,
-        brandId: editForm.brandId ? Number(editForm.brandId) : undefined,
-      });
-      alert('Cập nhật sản phẩm thành công! ✅');
-      setSelectedProduct(null);
-      loadProducts();
-    } catch (err) { alert(err.message || 'Lỗi cập nhật!'); }
-    finally { setSaving(false); }
-  };
-
-  const handleDelete = async (id) => {
+  const handleDelete = async (id, e) => {
+    e.stopPropagation();
     if (!confirm('Bạn có chắc muốn xóa sản phẩm này?')) return;
     try {
       await deleteProduct(id);
       alert('Đã xóa sản phẩm! 🗑️');
-      setSelectedProduct(null);
       loadProducts();
     } catch (err) { alert(err.message || 'Lỗi xóa!'); }
   };
 
   return (
-    <div className="flex gap-8">
-      <div className={`transition-all duration-500 bg-white rounded-3xl shadow-sm p-8 border border-gray-50 ${selectedProduct ? 'w-2/3' : 'w-full'}`}>
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-xl font-bold">Kho sản phẩm ({products.length})</h3>
-          <button onClick={onNavigateToUpload}
-            className="bg-[#4318FF] text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition cursor-pointer">
-            + Thêm SP mới
-          </button>
-        </div>
-
-        {/* Thanh lọc theo hãng + tìm kiếm */}
-        <div className="flex gap-2 mb-6">
-          <input type="text" value={searchKeyword} onChange={(e) => setSearchKeyword(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSearchProducts()}
-            placeholder="Tìm sản phẩm..." className="flex-1 bg-gray-50 rounded-xl px-4 py-3 text-sm outline-none border border-transparent focus:border-[#4318FF]" />
-          <select value={brandFilter} onChange={(e) => { setBrandFilter(e.target.value); setPage(0); }}
-            className="bg-gray-50 rounded-xl px-4 py-3 text-sm outline-none font-bold">
-            <option value="">Tất cả hãng</option>
-            {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-          <button onClick={handleSearchProducts} className="bg-[#4318FF] text-white px-6 rounded-xl font-bold text-sm cursor-pointer">🔍</button>
-        </div>
-
-        {loading ? (
-          <div className="space-y-3">{[...Array(8)].map((_, i) => <div key={i} className="h-14 bg-gray-50 rounded-xl animate-pulse"></div>)}</div>
-        ) : (
-          <table className="w-full text-left">
-            <thead>
-              <tr className="text-[#A3AED0] text-xs uppercase border-b border-gray-100">
-                <th className="pb-4 font-medium">Sản phẩm</th>
-                <th className="pb-4 font-medium">Hãng</th>
-                <th className="pb-4 font-medium text-right">Giá từ</th>
-                <th className="pb-4 font-medium text-center">Hành động</th>
-              </tr>
-            </thead>
-            <tbody className="text-sm">
-              {products.map(p => (
-                <tr key={p.id} className={`border-b border-gray-50 hover:bg-gray-50 transition group ${selectedProduct?.id === p.id ? 'bg-blue-50/50' : ''}`}>
-                  <td className="py-4 flex items-center gap-4 cursor-pointer" onClick={() => handleSelect(p)}>
-                    <img src={p.image} className="w-12 h-12 object-contain bg-gray-50 rounded-lg p-1" alt="" />
-                    <span className="font-bold text-[#2b3674] group-hover:text-[#4318FF] transition line-clamp-1">{p.name}</span>
-                  </td>
-                  <td className="py-4 text-gray-500">{p.brandName}</td>
-                  <td className="py-4 font-bold text-right text-red-600">{p.minPrice ? Number(p.minPrice).toLocaleString('vi-VN') + '₫' : '-'}</td>
-                  <td className="py-4 text-center">
-                    <div className="flex gap-2 justify-center">
-                      <button onClick={() => handleSelect(p)} className="p-2 hover:bg-blue-50 text-blue-600 rounded-lg transition cursor-pointer">📝</button>
-                      <button onClick={() => handleDelete(p.id)} className="p-2 hover:bg-red-50 text-red-600 rounded-lg transition cursor-pointer">🗑️</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-
-        {totalPages > 1 && (
-          <div className="flex justify-center gap-2 mt-6">
-            <button onClick={() => setPage(Math.max(0, page - 1))} disabled={page === 0} className="px-4 py-2 rounded-lg border text-sm font-bold disabled:opacity-30 cursor-pointer">←</button>
-            <span className="px-4 py-2 text-sm font-bold text-gray-500">{page + 1} / {totalPages}</span>
-            <button onClick={() => setPage(page + 1)} disabled={page >= totalPages - 1} className="px-4 py-2 rounded-lg border text-sm font-bold disabled:opacity-30 cursor-pointer">→</button>
-          </div>
-        )}
+    <div className="bg-white rounded-3xl shadow-sm p-8 border border-gray-50">
+      <div className="flex justify-between items-center mb-6">
+        <h3 className="text-xl font-bold">Kho sản phẩm ({products.length})</h3>
+        <button onClick={onNavigateToUpload}
+          className="bg-[#4318FF] text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition cursor-pointer">
+          + Thêm SP mới
+        </button>
       </div>
 
-      {/* Panel sửa SP */}
-      {selectedProduct && (
-        <div className="w-1/3 bg-white rounded-3xl shadow-xl border border-gray-100 p-8 sticky top-0 h-fit space-y-5">
-          <div className="flex justify-between items-start">
-            <div className="flex items-center gap-4">
-              <img src={selectedProduct.image} className="w-16 h-16 object-contain bg-gray-50 rounded-2xl p-2 border" alt="" />
-              <div>
-                <h4 className="text-lg font-black leading-tight line-clamp-2">{selectedProduct.name}</h4>
-                <p className="text-xs text-gray-400">ID: {selectedProduct.id}</p>
-              </div>
-            </div>
-            <button onClick={() => setSelectedProduct(null)} className="text-gray-300 hover:text-black text-xl cursor-pointer">✕</button>
-          </div>
+      {/* Thanh lọc */}
+      <div className="flex gap-2 mb-6">
+        <input type="text" value={searchKeyword} onChange={(e) => setSearchKeyword(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleSearchProducts()}
+          placeholder="Tìm sản phẩm..." className="flex-1 bg-gray-50 rounded-xl px-4 py-3 text-sm outline-none border border-transparent focus:border-[#4318FF]" />
+        <select value={brandFilter} onChange={(e) => { setBrandFilter(e.target.value); setPage(0); }}
+          className="bg-gray-50 rounded-xl px-4 py-3 text-sm outline-none font-bold">
+          <option value="">Tất cả hãng</option>
+          {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+        <button onClick={handleSearchProducts} className="bg-[#4318FF] text-white px-6 rounded-xl font-bold text-sm cursor-pointer">🔍</button>
+      </div>
 
-          <div>
-            <label className="text-[10px] font-black text-[#A3AED0] uppercase block mb-1">Tên sản phẩm</label>
-            <input type="text" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-              className="w-full bg-[#f4f7fe] rounded-xl p-3 outline-none font-bold border border-transparent focus:border-[#4318FF]" />
-          </div>
+      {loading ? (
+        <div className="space-y-3">{[...Array(8)].map((_, i) => <div key={i} className="h-14 bg-gray-50 rounded-xl animate-pulse"></div>)}</div>
+      ) : (
+        <table className="w-full text-left">
+          <thead>
+            <tr className="text-[#A3AED0] text-xs uppercase border-b border-gray-100">
+              <th className="pb-4 font-medium">Sản phẩm</th>
+              <th className="pb-4 font-medium">Hãng</th>
+              <th className="pb-4 font-medium text-right">Giá từ</th>
+              <th className="pb-4 font-medium text-center">Hành động</th>
+            </tr>
+          </thead>
+          <tbody className="text-sm">
+            {products.map(p => (
+              <tr key={p.id} onClick={() => onViewDetail(p.id)}
+                className="border-b border-gray-50 hover:bg-indigo-50/40 transition group cursor-pointer">
+                <td className="py-4 flex items-center gap-4">
+                  <img src={p.image} className="w-12 h-12 object-contain bg-gray-50 rounded-lg p-1" alt="" />
+                  <span className="font-bold text-[#2b3674] group-hover:text-[#4318FF] transition line-clamp-1">{p.name}</span>
+                </td>
+                <td className="py-4 text-gray-500">{p.brandName}</td>
+                <td className="py-4 font-bold text-right text-red-600">{p.minPrice ? Number(p.minPrice).toLocaleString('vi-VN') + '₫' : '-'}</td>
+                <td className="py-4 text-center">
+                  <div className="flex gap-2 justify-center">
+                    <button onClick={(e) => { e.stopPropagation(); onViewDetail(p.id); }} className="p-2 hover:bg-blue-50 text-blue-600 rounded-lg transition cursor-pointer" title="Xem chi tiết">🔍</button>
+                    <button onClick={(e) => handleDelete(p.id, e)} className="p-2 hover:bg-red-50 text-red-600 rounded-lg transition cursor-pointer" title="Xóa">🗑️</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
 
-          <div>
-            <label className="text-[10px] font-black text-[#A3AED0] uppercase block mb-1">Hãng</label>
-            <select value={editForm.brandId} onChange={(e) => setEditForm({ ...editForm, brandId: e.target.value })}
-              className="w-full bg-[#f4f7fe] rounded-xl p-3 outline-none font-bold">
-              <option value="">-- Chọn hãng --</option>
-              {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
-          </div>
-
-          <div>
-            <label className="text-[10px] font-black text-[#A3AED0] uppercase block mb-1">Ảnh đại diện (Upload)</label>
-            <input type="file" accept="image/*" onChange={async (e) => {
-              if (e.target.files[0]) {
-                const res = await uploadImage(e.target.files[0]);
-                setEditForm({ ...editForm, image: res.result });
-              }
-            }} className="w-full bg-[#f4f7fe] rounded-xl p-2 outline-none text-sm" />
-            {editForm.image && <p className="text-[10px] text-green-600 mt-1">Đã cấp: {String(editForm.image).substring(0, 30)}...</p>}
-          </div>
-
-          <div>
-            <label className="text-[10px] font-black text-[#A3AED0] uppercase block mb-1">Mô tả</label>
-            <textarea value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-              className="w-full bg-[#f4f7fe] rounded-xl p-3 outline-none text-sm h-24 resize-none" />
-          </div>
-
-          <div className="flex gap-3 pt-2">
-            <button onClick={handleSave} disabled={saving}
-              className="flex-1 bg-[#4318FF] text-white py-4 rounded-2xl font-black shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition cursor-pointer">
-              {saving ? '⏳ Đang lưu...' : 'LƯU THAY ĐỔI'}
-            </button>
-            <button onClick={() => handleDelete(selectedProduct.id)}
-              className="p-4 bg-red-50 text-red-600 rounded-2xl font-bold hover:bg-red-100 cursor-pointer">🗑️</button>
-          </div>
+      {totalPages > 1 && (
+        <div className="flex justify-center gap-2 mt-6">
+          <button onClick={() => setPage(Math.max(0, page - 1))} disabled={page === 0} className="px-4 py-2 rounded-lg border text-sm font-bold disabled:opacity-30 cursor-pointer">←</button>
+          <span className="px-4 py-2 text-sm font-bold text-gray-500">{page + 1} / {totalPages}</span>
+          <button onClick={() => setPage(page + 1)} disabled={page >= totalPages - 1} className="px-4 py-2 rounded-lg border text-sm font-bold disabled:opacity-30 cursor-pointer">→</button>
         </div>
       )}
+    </div>
+  );
+};
+
+// ====================================================================
+// 3b. CHI TIẾT SẢN PHẨM ADMIN - Đầy đủ thông số + sửa version
+// ====================================================================
+const ProductDetailAdmin = ({ productId, onBack, onDeleted }) => {
+  const [product, setProduct] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [brands, setBrands] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [editForm, setEditForm] = useState({ name: '', description: '', image: '', brandId: '' });
+  const [mainImage, setMainImage] = useState('');
+  const [versionEdits, setVersionEdits] = useState({}); // { versionId: { price, stock } }
+  const [savingVersions, setSavingVersions] = useState({});
+  const [galleryFiles, setGalleryFiles] = useState([]);
+  const [galleryPreviews, setGalleryPreviews] = useState([]);
+  const [uploadingGallery, setUploadingGallery] = useState(false);
+  const [activeTab, setActiveTab] = useState('info'); // 'info' | 'versions' | 'specs'
+
+  useEffect(() => {
+    loadDetail();
+    getBrands().then(d => setBrands(d.result || [])).catch(() => { });
+  }, [productId]);
+
+  const loadDetail = async () => {
+    setLoading(true);
+    try {
+      const data = await getProductDetail(productId);
+      const p = data.result;
+      setProduct(p);
+      setEditForm({ name: p.name || '', description: p.description || '', image: p.image || '', brandId: p.brandId || '' });
+      setMainImage(p.image || '');
+      // Khởi tạo versionEdits từ data thực
+      const initEdits = {};
+      (p.versions || []).forEach(v => {
+        initEdits[v.versionID] = { price: v.price || '', stock: v.stock ?? '' };
+      });
+      setVersionEdits(initEdits);
+    } catch (err) { console.error('Lỗi load chi tiết SP:', err); }
+    finally { setLoading(false); }
+  };
+
+  const handleSaveInfo = async () => {
+    setSaving(true);
+    try {
+      await updateProduct(productId, {
+        name: editForm.name,
+        description: editForm.description,
+        image: editForm.image,
+        brandId: editForm.brandId ? Number(editForm.brandId) : undefined,
+      });
+      alert('Cập nhật thông tin thành công! ✅');
+      loadDetail();
+    } catch (err) { alert(err.message || 'Lỗi cập nhật!'); }
+    finally { setSaving(false); }
+  };
+
+  const handleSaveVersion = async (versionId) => {
+    setSavingVersions(prev => ({ ...prev, [versionId]: true }));
+    try {
+      const edit = versionEdits[versionId];
+      await updateVersion(versionId, {
+        price: Number(edit.price),
+        stock: Number(edit.stock),
+      });
+      alert('Cập nhật phiên bản thành công! ✅');
+      loadDetail();
+    } catch (err) { alert(err.message || 'Lỗi cập nhật version!'); }
+    finally { setSavingVersions(prev => ({ ...prev, [versionId]: false })); }
+  };
+
+  const handleDelete = async () => {
+    if (!confirm('Xóa sản phẩm này? Thao tác không thể hoàn tác!')) return;
+    try {
+      await deleteProduct(productId);
+      alert('Đã xóa sản phẩm!');
+      onDeleted();
+    } catch (err) { alert(err.message || 'Lỗi xóa!'); }
+  };
+
+  const handleGallerySelect = (e) => {
+    const files = Array.from(e.target.files);
+    setGalleryFiles(prev => [...prev, ...files]);
+    setGalleryPreviews(prev => [...prev, ...files.map(f => URL.createObjectURL(f))]);
+  };
+
+  const handleUploadGallery = async () => {
+    if (!galleryFiles.length) return;
+    setUploadingGallery(true);
+    try {
+      await uploadGallery(productId, galleryFiles);
+      alert('Upload gallery thành công! 📸');
+      setGalleryFiles([]);
+      setGalleryPreviews([]);
+      loadDetail();
+    } catch (err) { alert(err.message || 'Lỗi upload!'); }
+    finally { setUploadingGallery(false); }
+  };
+
+  const formatVND = (v) => v ? Number(v).toLocaleString('vi-VN') + '₫' : '-';
+
+  if (loading) return (
+    <div className="space-y-4">{[...Array(6)].map((_, i) => <div key={i} className="h-12 bg-gray-100 rounded-2xl animate-pulse" />)}</div>
+  );
+  if (!product) return <div className="text-center py-20 text-gray-400">Không tìm thấy sản phẩm</div>;
+
+  const specs = product.specs || {};
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center gap-4">
+        <button onClick={onBack} className="flex items-center gap-2 text-sm text-gray-400 hover:text-[#4318FF] font-bold cursor-pointer transition">
+          ← Quay lại danh sách
+        </button>
+        <div className="flex-1" />
+        <button onClick={handleDelete} className="px-4 py-2 bg-red-50 text-red-600 rounded-xl font-bold text-sm hover:bg-red-100 cursor-pointer transition">
+          🗑️ Xóa sản phẩm
+        </button>
+      </div>
+
+      {/* Hero block */}
+      <div className="bg-white rounded-3xl shadow-sm border border-gray-50 p-8">
+        <div className="flex flex-col lg:flex-row gap-8">
+          {/* Ảnh + Gallery */}
+          <div className="lg:w-2/5 space-y-4">
+            <div className="bg-gray-50 rounded-2xl p-6 flex items-center justify-center min-h-[280px] border border-gray-100">
+              <img src={mainImage || product.image} alt={product.name} className="max-h-[260px] object-contain" />
+            </div>
+            {/* Thumbnail gallery */}
+            {product.imageUrls?.length > 0 && (
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {product.imageUrls.map((url, idx) => (
+                  <div key={idx} onClick={() => setMainImage(url)}
+                    className={`shrink-0 w-14 h-14 border-2 rounded-xl p-1 cursor-pointer transition-all ${mainImage === url ? 'border-[#4318FF]' : 'border-gray-100 hover:border-gray-300'}`}>
+                    <img src={url} alt="" className="w-full h-full object-contain" />
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* Upload gallery */}
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-[#A3AED0] uppercase block">Thêm ảnh Gallery</label>
+              <input type="file" accept="image/*" multiple onChange={handleGallerySelect}
+                className="w-full bg-gray-50 rounded-xl p-2 outline-none text-xs border" />
+              {galleryPreviews.length > 0 && (
+                <div className="flex gap-2 flex-wrap">
+                  {galleryPreviews.map((url, idx) => (
+                    <img key={idx} src={url} className="w-12 h-12 object-cover rounded-lg border" alt="" />
+                  ))}
+                </div>
+              )}
+              {galleryFiles.length > 0 && (
+                <button onClick={handleUploadGallery} disabled={uploadingGallery}
+                  className="w-full bg-[#058a81] text-white py-2 rounded-xl text-sm font-bold hover:bg-teal-700 transition cursor-pointer">
+                  {uploadingGallery ? '⏳ Đang upload...' : `📸 Upload ${galleryFiles.length} ảnh`}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Info */}
+          <div className="flex-1 space-y-4">
+            <div>
+              <h1 className="text-2xl font-black text-[#2b3674]">{product.name}</h1>
+              <div className="flex items-center gap-3 mt-1">
+                <span className="text-sm text-gray-400">ID: {product.id}</span>
+                {product.brandName && <span className="bg-indigo-50 text-[#4318FF] text-xs px-3 py-1 rounded-full font-bold">{product.brandName}</span>}
+              </div>
+            </div>
+
+            {/* Giá hiển thị nhanh */}
+            <div className="flex gap-4 py-2 border-y border-gray-100">
+              <div>
+                <p className="text-xs text-gray-400">Giá thấp nhất</p>
+                <p className="text-xl font-black text-red-600">{formatVND(product.minPrice)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-400">Số phiên bản</p>
+                <p className="text-xl font-black text-[#4318FF]">{product.versions?.length || 0}</p>
+              </div>
+            </div>
+
+            {/* Tabs */}
+            <div className="flex gap-2">
+              {['info', 'versions', 'specs'].map(tab => (
+                <button key={tab} onClick={() => setActiveTab(tab)}
+                  className={`px-4 py-2 rounded-xl text-sm font-bold transition cursor-pointer ${activeTab === tab ? 'bg-[#4318FF] text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                  {tab === 'info' ? '✏️ Thông tin' : tab === 'versions' ? '📦 Phiên bản' : '📋 Thông số'}
+                </button>
+              ))}
+            </div>
+
+            {/* Tab: Thông tin cơ bản */}
+            {activeTab === 'info' && (
+              <div className="space-y-4">
+                <div>
+                  <label className="text-[10px] font-black text-[#A3AED0] uppercase block mb-1">Tên sản phẩm</label>
+                  <input type="text" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                    className="w-full bg-[#f4f7fe] rounded-xl p-3 outline-none font-bold border border-transparent focus:border-[#4318FF]" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-[#A3AED0] uppercase block mb-1">Hãng</label>
+                  <select value={editForm.brandId} onChange={(e) => setEditForm({ ...editForm, brandId: e.target.value })}
+                    className="w-full bg-[#f4f7fe] rounded-xl p-3 outline-none font-bold">
+                    <option value="">-- Chọn hãng --</option>
+                    {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-[#A3AED0] uppercase block mb-1">Ảnh đại diện (Upload)</label>
+                  <input type="file" accept="image/*" onChange={async (e) => {
+                    if (e.target.files[0]) {
+                      const res = await uploadImage(e.target.files[0]);
+                      setEditForm({ ...editForm, image: res.result });
+                      setMainImage(res.result);
+                    }
+                  }} className="w-full bg-[#f4f7fe] rounded-xl p-2 outline-none text-sm border" />
+                  {editForm.image && <p className="text-[10px] text-green-600 mt-1">✓ Đã cập nhật ảnh</p>}
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-[#A3AED0] uppercase block mb-1">Mô tả</label>
+                  <textarea value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                    className="w-full bg-[#f4f7fe] rounded-xl p-3 outline-none text-sm h-28 resize-none" />
+                </div>
+                <button onClick={handleSaveInfo} disabled={saving}
+                  className="w-full bg-[#4318FF] text-white py-3 rounded-2xl font-black shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition cursor-pointer">
+                  {saving ? '⏳ Đang lưu...' : '💾 LƯU THÔNG TIN'}
+                </button>
+              </div>
+            )}
+
+            {/* Tab: Phiên bản */}
+            {activeTab === 'versions' && (
+              <div className="space-y-3">
+                <p className="text-xs text-gray-400 font-bold uppercase">Cập nhật giá & kho từng phiên bản</p>
+                {(product.versions || []).length === 0 && <p className="text-gray-400 text-sm">Chưa có phiên bản nào</p>}
+                {(product.versions || []).map(v => {
+                  const edit = versionEdits[v.versionID] || { price: v.price, stock: v.stock };
+                  const isSaving = savingVersions[v.versionID];
+                  return (
+                    <div key={v.versionID} className="bg-gray-50 rounded-2xl p-5 border border-gray-100">
+                      <div className="flex items-center gap-3 mb-4">
+                        {v.imageURL && <img src={v.imageURL} className="w-10 h-10 object-contain rounded-lg bg-white border" alt="" />}
+                        <div>
+                          <p className="font-bold text-sm">{v.colour} / {v.storage}</p>
+                          {v.material && <p className="text-xs text-gray-400">{v.material}</p>}
+                          <p className="text-[10px] text-gray-300">Version ID: {v.versionID}</p>
+                        </div>
+                        <div className={`ml-auto px-2 py-1 rounded-lg text-[10px] font-black ${v.stock > 0 ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'}`}>
+                          {v.stock > 0 ? `Còn ${v.stock} máy` : 'Hết hàng'}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-black text-[#A3AED0] uppercase block mb-1">Giá (₫)</label>
+                          <input type="number" value={edit.price}
+                            onChange={(e) => setVersionEdits(prev => ({ ...prev, [v.versionID]: { ...edit, price: e.target.value } }))}
+                            className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:border-[#4318FF]" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-black text-[#A3AED0] uppercase block mb-1">Tồn kho</label>
+                          <input type="number" value={edit.stock}
+                            onChange={(e) => setVersionEdits(prev => ({ ...prev, [v.versionID]: { ...edit, stock: e.target.value } }))}
+                            className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:border-[#4318FF]" />
+                        </div>
+                      </div>
+                      <button onClick={() => handleSaveVersion(v.versionID)} disabled={isSaving}
+                        className="mt-3 w-full bg-[#058a81] text-white py-2 rounded-xl text-sm font-bold hover:bg-teal-700 transition cursor-pointer">
+                        {isSaving ? '⏳ Đang lưu...' : '💾 Lưu phiên bản này'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Tab: Thông số kỹ thuật */}
+            {activeTab === 'specs' && (
+              <div className="bg-gray-50 rounded-2xl p-5 border border-gray-100">
+                {!specs || Object.keys(specs).length === 0 ? (
+                  <p className="text-gray-400 text-sm italic">Chưa có thông số kỹ thuật</p>
+                ) : (
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {[
+                        ['Màn hình', specs.screenSize],
+                        ['Công nghệ màn hình', specs.screenTech],
+                        ['Camera sau', specs.rearCamera],
+                        ['Camera trước', specs.frontCamera],
+                        ['Chip xử lý', specs.chipset],
+                        ['RAM', specs.ram],
+                        ['ROM', specs.rom],
+                        ['Pin', specs.battery],
+                        ['Hệ điều hành', specs.os],
+                      ].map(([label, val], i, arr) => (
+                        <tr key={i} className={`${i !== arr.length - 1 ? 'border-b border-gray-200' : ''}`}>
+                          <td className="py-2.5 text-gray-400 w-2/5 text-xs font-bold uppercase">{label}</td>
+                          <td className="py-2.5 text-right font-semibold text-[#2b3674] text-sm">{val || <span className="text-gray-300 italic text-xs">Chưa cập nhật</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
@@ -949,6 +1480,14 @@ const CustomerManagement = () => {
   const [roles, setRoles] = useState([]);
   const [selectedRole, setSelectedRole] = useState('');
   const [updatingRole, setUpdatingRole] = useState(false);
+  const [selectedMembership, setSelectedMembership] = useState(null);
+
+  const TIER_STYLES = {
+    REGULAR: { label: 'Thành viên', icon: '🙂', bg: 'bg-gray-100', text: 'text-gray-500' },
+    SILVER: { label: 'Bạc', icon: '🥈', bg: 'bg-slate-100', text: 'text-slate-500' },
+    GOLD: { label: 'Vàng', icon: '🥇', bg: 'bg-yellow-100', text: 'text-yellow-600' },
+    PLATINUM: { label: 'Bạch Kim', icon: '💎', bg: 'bg-indigo-100', text: 'text-indigo-600' },
+  };
 
   useEffect(() => { loadUsers(); loadRoles(); }, [page, roleFilter]);
 
@@ -970,7 +1509,15 @@ const CustomerManagement = () => {
     } catch (err) { console.error("Lỗi load roles:", err); }
   };
 
-  const handleSearch = () => { setPage(0); loadUsers(); };
+  const handleSelectUser = async (u) => {
+    setSelectedUser(u);
+    setSelectedRole(u.roleName || 'USER');
+    setSelectedMembership(null);
+    try {
+      const data = await getMembershipByUser(u.userID);
+      setSelectedMembership(data.result);
+    } catch { }
+  };
 
   const handleUpdateRole = async () => {
     if (!selectedUser || !selectedRole) return alert('Vui lòng chọn role!');
@@ -979,7 +1526,6 @@ const CustomerManagement = () => {
     try {
       const data = await updateUserRole(selectedUser.username, selectedRole);
       alert(`Cấp quyền ${selectedRole} cho ${selectedUser.username} thành công! ✅`);
-      // Cập nhật selectedUser với data mới từ response
       if (data.result) setSelectedUser(data.result);
       loadUsers();
     } catch (err) { alert(err.message || 'Lỗi cấp quyền!'); }
@@ -998,6 +1544,9 @@ const CustomerManagement = () => {
     } catch (err) { alert(err.message || 'Lỗi thu hồi quyền!'); }
     finally { setUpdatingRole(false); }
   };
+
+  const handleSearch = () => { setPage(0); loadUsers(); };
+
 
   return (
     <div className="flex gap-8">
@@ -1032,25 +1581,34 @@ const CustomerManagement = () => {
               </tr>
             </thead>
             <tbody className="text-sm">
-              {users.map(u => (
-                <tr key={u.userID} className={`border-b border-gray-50 hover:bg-gray-50 transition cursor-pointer ${selectedUser?.userID === u.userID ? 'bg-blue-50/50' : ''}`}
-                  onClick={() => { setSelectedUser(u); setSelectedRole(u.roleName || 'USER'); }}>
-                  <td className="py-4 font-bold text-[#058a81]">{u.username}</td>
-                  <td className="py-4 text-gray-800 font-bold">{u.fullName || '-'}</td>
-                  <td className="py-4 text-gray-500">{u.email || '-'}</td>
-                  <td className="py-4 text-gray-500">{u.phoneNumber || '-'}</td>
-                  <td className="py-4 text-center">
-                    <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase ${u.roleName === 'ADMIN' ? 'bg-purple-100 text-purple-600' : 'bg-green-100 text-green-600'}`}>
-                      {u.roleName || 'USER'}
-                    </span>
-                  </td>
-                  <td className="py-4 text-center">
-                    <button onClick={(e) => { e.stopPropagation(); setSelectedUser(u); setSelectedRole(u.roleName || 'USER'); }}
-                      className="p-2 hover:bg-blue-50 text-blue-600 rounded-lg transition cursor-pointer">👁️</button>
-                  </td>
-                </tr>
-              ))}
-              {users.length === 0 && <tr><td colSpan={5} className="py-12 text-center text-gray-400">Không có user nào</td></tr>}
+              {users.map(u => {
+                const tier = u.membershipTier || 'REGULAR';
+                const ts = TIER_STYLES[tier] || TIER_STYLES.REGULAR;
+                return (
+                  <tr key={u.userID} className={`border-b border-gray-50 hover:bg-gray-50 transition cursor-pointer ${selectedUser?.userID === u.userID ? 'bg-blue-50/50' : ''}`}
+                    onClick={() => handleSelectUser(u)}>
+                    <td className="py-4 font-bold text-[#058a81]">{u.username}</td>
+                    <td className="py-4 text-gray-800 font-bold">{u.fullName || '-'}</td>
+                    <td className="py-4 text-gray-500">{u.email || '-'}</td>
+                    <td className="py-4 text-gray-500">{u.phoneNumber || '-'}</td>
+                    <td className="py-4 text-center">
+                      <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase ${u.roleName === 'ADMIN' ? 'bg-purple-100 text-purple-600' : 'bg-green-100 text-green-600'}`}>
+                        {u.roleName || 'USER'}
+                      </span>
+                    </td>
+                    <td className="py-4 text-center">
+                      <span className={`px-2 py-1 rounded-lg text-[10px] font-black ${ts.bg} ${ts.text}`}>
+                        {ts.icon} {ts.label}
+                      </span>
+                    </td>
+                    <td className="py-4 text-center">
+                      <button onClick={(e) => { e.stopPropagation(); handleSelectUser(u); }}
+                        className="p-2 hover:bg-blue-50 text-blue-600 rounded-lg transition cursor-pointer">👁️</button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {users.length === 0 && <tr><td colSpan={7} className="py-12 text-center text-gray-400">Không có user nào</td></tr>}
             </tbody>
           </table>
         )}
@@ -1079,7 +1637,7 @@ const CustomerManagement = () => {
                 </span>
               </div>
             </div>
-            <button onClick={() => setSelectedUser(null)} className="text-gray-300 hover:text-black text-xl cursor-pointer">✕</button>
+            <button onClick={() => { setSelectedUser(null); setSelectedMembership(null); }} className="text-gray-300 hover:text-black text-xl cursor-pointer">✕</button>
           </div>
 
           <div className="space-y-4 text-sm">
@@ -1096,6 +1654,34 @@ const CustomerManagement = () => {
               <span>⚧</span> <span className="font-bold">{selectedUser.gender || 'Chưa cập nhật'}</span>
             </div>
           </div>
+
+          {/* MEMBERSHIP BLOCK */}
+          {selectedMembership ? (() => {
+            const m = selectedMembership;
+            const ts = TIER_STYLES[m.tier] || TIER_STYLES.REGULAR;
+            const formatVND = (v) => v ? Number(v).toLocaleString('vi-VN') + '₫' : '0₫';
+            return (
+              <div className={`border rounded-2xl p-4 ${ts.bg} space-y-2`}>
+                <div className="flex items-center justify-between">
+                  <span className={`text-sm font-black ${ts.text}`}>{ts.icon} {m.tierLabel || ts.label}</span>
+                  {m.tier !== 'REGULAR' && <span className="text-[10px] text-gray-400">Từ {m.since ? new Date(m.since).toLocaleDateString('vi-VN') : '—'}</span>}
+                </div>
+                <div className="text-xs text-gray-500">Tổng chi tiêu: <span className="font-black text-gray-700">{formatVND(m.totalSpent)}</span></div>
+                {m.tier !== 'PLATINUM' && (
+                  <>
+                    <div className="w-full bg-white rounded-full h-2">
+                      <div className={`h-2 rounded-full ${m.tier === 'GOLD' ? 'bg-yellow-400' : m.tier === 'SILVER' ? 'bg-slate-400' : 'bg-gray-300'} transition-all`}
+                        style={{ width: `${Math.min(Number(m.progressPercent) || 0, 100)}%` }} />
+                    </div>
+                    <div className="text-[10px] text-gray-400 text-right">{m.progressPercent}% → {formatVND(m.nextThreshold)}</div>
+                  </>
+                )}
+                {m.tier === 'PLATINUM' && <p className="text-[10px] font-black text-indigo-500">💎 Hạng tối đa — Cảm ơn khách hàng thân thiết!</p>}
+              </div>
+            );
+          })() : (
+            <div className="text-xs text-gray-400 text-center py-2">Đang tải thông tin hạng...</div>
+          )}
 
           {/* QUẢN LÝ QUYỀN */}
           <div className="border-t pt-4 space-y-4">
