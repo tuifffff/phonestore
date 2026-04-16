@@ -1,16 +1,69 @@
-# React + Vite
+# 📱 PhoneHub - Client & Admin Interface
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+👉 [Click here to view the Backend RESTful API Repository](https://github.com/tuifffff/phonestore_be)
 
-Currently, two official plugins are available:
+## 📌 Project Overview
+PhoneHub is the comprehensive Client and Admin frontend for a modern e-commerce system. Built with performance and usability in mind, it delivers a dynamic Single Page Application (SPA) experience. From the administrative data-driven dashboards to the seamless and intuitive checkout workflow for customers, this application is built to prioritize user-centric design, robust data representation, and efficient REST API integrations.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## 🛠 Tech Stack
 
-## React Compiler
+![React](https://img.shields.io/badge/react-%2320232a.svg?style=for-the-badge&logo=react&logoColor=%2361DAFB)
+![Vite](https://img.shields.io/badge/vite-%23646CFF.svg?style=for-the-badge&logo=vite&logoColor=white)
+![TailwindCSS](https://img.shields.io/badge/tailwindcss-%2338B2AC.svg?style=for-the-badge&logo=tailwind-css&logoColor=white)
+![Redux](https://img.shields.io/badge/redux-%23593d88.svg?style=for-the-badge&logo=redux&logoColor=white)
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+* **React 19:** Delivering an incredibly fast, interactive, and modern user interface.
+* **Vite:** Next-generation frontend tooling for ultra-fast, optimized development builds.
+* **Tailwind CSS 4:** Modern, utility-first CSS framework for responsive and beautiful UI design.
+* **Redux Toolkit:** Powering complex state management for the Cart, User Authentication, and permissions.
+* **Recharts:** Composable charting library supplying the interactive Data Visualization elements.
 
-## Expanding the ESLint configuration
+## 📸 Gallery / Screenshots
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+![Home](image.png)
+*Customer Storefront - Exploring the latest devices*
+
+![Checkout](image-1.png)
+*Seamless Checkout - Dynamic geographical API integrations*
+
+![Dashboard](image-2.png)
+*Admin Dashboard - Data-driven business insights*
+
+## ✨ Key Features
+
+* 📊 **Data-Driven Admin Dashboard:** Leverage comprehensive visualizations (built with Recharts) to monitor sales velocity, member statistics, and inventory metrics in real-time.
+* 🛍️ **Seamless Checkout Experience:** A smooth checkout flow with out-of-the-box integration into 3-tier geographical APIs ensuring highly accurate delivery address validation and processing.
+* 🧠 **Complex State Management:** Robust, centralized handling of JSON Web Tokens (JWT), shopping cart persistence, and role-based interface access utilizing Redux Toolkit.
+* 🖥️ **Responsive & Modern UI:** A premium, visually distinct interface constructed dynamically with Tailwind CSS 4, assuring optimal user experiences across all resolutions and devices.
+
+## 🚀 Getting Started
+
+### Prerequisites
+Make sure you have installed on your local machine:
+* **Node.js** (v18+ recommended)
+* **npm** or **yarn**
+
+### Installation & Run
+
+1. **Navigate to the frontend directory:**
+   ```bash
+   cd phone-store-fe
+   ```
+
+2. **Install all Node dependencies:**
+   ```bash
+   npm install
+   ```
+
+3. **Configure the Environment Interfaces:**
+   Create a `.env` file in the root directory and inject your API configurations (e.g., base URL):
+   ```env
+   VITE_API_BASE_URL=http://localhost:8080/api
+   ```
+
+4. **Launch the development server:**
+   ```bash
+   npm run dev
+   ```
+
+5. The application will be alive at usually [http://localhost:5173](http://localhost:5173). Connect your browser to start building!
