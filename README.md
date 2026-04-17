@@ -21,12 +21,28 @@ PhoneHub is the comprehensive Client and Admin frontend for a modern e-commerce 
 ## 📸 Gallery / Screenshots
 
 ![Home](image.png)
+![Home](image-8.png)
+
 <br>
 *Customer Storefront - Exploring the latest devices*
-![Checkout](image-1.png)
+
+![Checkout](image-9.png)
+
 <br>
 *Seamless Checkout - Dynamic geographical API integrations*
+
 ![Dashboard](image-2.png)
+
+![Dashboard](image-3.png)
+
+![Dashboard](image-4.png)
+
+![Dashboard](image-5.png)
+
+![Dashboard](image-6.png)
+
+![Dashboard](image-7.png)
+
 <br>
 *Admin Dashboard - Data-driven business insights*
 
