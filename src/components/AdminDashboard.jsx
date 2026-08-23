@@ -5,10 +5,11 @@ import {
   getAllOrders, updateOrderStatus, rejectOrder, confirmPayment, countPendingOrders, getOrderDetail, exportInvoice,
   getAllUsers, updateUserRole, revokeUserRole, getRoles, createRole, deleteRole, getPermissions, createPermission,
   getRevenue, getTopSelling, getYearlyRevenue, getDailyRevenue,
-  uploadGallery, uploadImage, updateVersion, getProductDetail,
+  uploadGallery, uploadImage, updateVersion, getProductDetail, deleteGalleryImage,
   getMyInfo, updateMyInfo, changePassword,
   getAllBanners, createBanner, deleteBanner, toggleBanner,
   getMembershipByUser,
+  getHotProductsAnalytics, triggerHotUpdate,
 } from '../api/api';
 
 // ====================================================================
@@ -41,7 +42,7 @@ const MENU_CONFIG = [
     id: 'users-group', label: 'Người dùng', icon: '👥',
     permission: null,
     children: [
-      { id: 'customers', label: 'Danh sách Khách hàng', permission: 'VIEW_ALL_ORDERS' }, // ADMIN + WAREHOUSE_STAFF
+      { id: 'customers', label: 'Danh sách Khách hàng', permission: 'VIEW_ORDER' }, // ADMIN + WAREHOUSE_STAFF
       { id: 'role-manage', label: 'Quản lý Quyền', permission: 'VIEW_REPORT' },    // Chỉ ADMIN
       { id: 'permission-manage', label: 'Quản lý Tính năng', permission: 'VIEW_REPORT' },    // Chỉ ADMIN
     ],
@@ -221,12 +222,42 @@ const DashboardOverview = () => {
   const [dailyData, setDailyData] = useState({});
   const [loading, setLoading] = useState(true);
   const [loadingDaily, setLoadingDaily] = useState(false);
+  const [hotData, setHotData] = useState(null);
+  const [loadingHot, setLoadingHot] = useState(false);
+  const [triggeringHot, setTriggeringHot] = useState(false);
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
 
   useEffect(() => { loadData(); }, [month, year]);
   useEffect(() => { loadDailyData(); }, [month, year]);
+  useEffect(() => { loadHotData(); }, []);
+
+  const loadHotData = async () => {
+    setLoadingHot(true);
+    try {
+      const data = await getHotProductsAnalytics();
+      setHotData(data.result);
+    } catch (err) {
+      console.error('Lỗi load hot products:', err);
+    } finally {
+      setLoadingHot(false);
+    }
+  };
+
+  const handleTriggerHot = async () => {
+    if (!confirm('Bạn có chắc muốn cập nhật lại Top 5 sản phẩm Hot ngay bây giờ?')) return;
+    setTriggeringHot(true);
+    try {
+      await triggerHotUpdate();
+      alert('✅ Đã cập nhật sản phẩm Hot thành công!');
+      await loadHotData();
+    } catch (err) {
+      alert(err.message || 'Lỗi cập nhật!');
+    } finally {
+      setTriggeringHot(false);
+    }
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -501,7 +532,7 @@ const DashboardOverview = () => {
       </div>
 
       {/* Bảng Top bán chạy */}
-      <div className="bg-white rounded-3xl shadow-sm p-8 border border-gray-50">
+      {/*<div className="bg-white rounded-3xl shadow-sm p-8 border border-gray-50">
         <h3 className="text-xl font-bold mb-6">🏆 Top sản phẩm bán chạy</h3>
         {loading ? (
           <div className="animate-pulse space-y-4">
@@ -531,6 +562,272 @@ const DashboardOverview = () => {
               {topSelling.length === 0 && <tr><td colSpan={3} className="py-8 text-center text-gray-400">Chưa có dữ liệu bán hàng</td></tr>}
             </tbody>
           </table>
+        )}
+      </div>*/}
+
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* 🔥 PHÂN TÍCH SẢN PHẨM HOT                              */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      <div className="bg-white rounded-3xl shadow-sm p-8 border border-gray-50">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xl font-bold">🔥 Phân tích sản phẩm Hot <span className="text-sm font-normal text-gray-400">(30 ngày gần nhất)</span></h3>
+          <button
+            onClick={handleTriggerHot}
+            disabled={triggeringHot}
+            className="bg-gradient-to-r from-red-500 to-orange-500 text-white px-5 py-2.5 rounded-xl font-bold text-sm hover:shadow-lg transition-all cursor-pointer disabled:opacity-50"
+          >
+            {triggeringHot ? '⏳ Đang cập nhật...' : '🔄 Cập nhật Hot ngay'}
+          </button>
+        </div>
+
+        {loadingHot ? (
+          <div className="animate-pulse space-y-6">
+            <div className="h-[250px] bg-gray-50 rounded-2xl" />
+            <div className="h-[250px] bg-gray-50 rounded-2xl" />
+          </div>
+        ) : !hotData || !hotData.products || hotData.products.length === 0 ? (
+          <div className="text-center py-16 text-gray-400">
+            <div className="text-5xl mb-4">📊</div>
+            <p className="font-bold">Chưa có dữ liệu sản phẩm Hot</p>
+            <p className="text-sm mt-2">Nhấn nút "Cập nhật Hot ngay" để quét dữ liệu bán hàng và gán nhãn Hot.</p>
+          </div>
+        ) : (
+          <div className="space-y-10">
+            {/* ── DONUT CHART: Tỷ lệ doanh thu ── */}
+            {(() => {
+              const hotRev = Number(hotData.hotRevenue) || 0;
+              const otherRev = Number(hotData.otherRevenue) || 0;
+              const totalRev = hotRev + otherRev;
+              const hotPct = totalRev > 0 ? (hotRev / totalRev) * 100 : 0;
+              const otherPct = totalRev > 0 ? (otherRev / totalRev) * 100 : 0;
+
+              // SVG Donut params
+              const cx = 140, cy = 130, R = 90, r = 55;
+              const hotAngle = (hotPct / 100) * 360;
+              const toRad = (deg) => (deg - 90) * (Math.PI / 180);
+
+              const hotArcEnd = toRad(hotAngle);
+              const hotLargeArc = hotAngle > 180 ? 1 : 0;
+
+              const ox1 = cx + R * Math.cos(toRad(0));
+              const oy1 = cy + R * Math.sin(toRad(0));
+              const ox2 = cx + R * Math.cos(hotArcEnd);
+              const oy2 = cy + R * Math.sin(hotArcEnd);
+              const ix1 = cx + r * Math.cos(hotArcEnd);
+              const iy1 = cy + r * Math.sin(hotArcEnd);
+              const ix2 = cx + r * Math.cos(toRad(0));
+              const iy2 = cy + r * Math.sin(toRad(0));
+
+              const hotPath = hotPct >= 100
+                ? `M ${cx - R},${cy} A ${R},${R} 0 1,1 ${cx + R},${cy} A ${R},${R} 0 1,1 ${cx - R},${cy} Z M ${cx - r},${cy} A ${r},${r} 0 1,0 ${cx + r},${cy} A ${r},${r} 0 1,0 ${cx - r},${cy} Z`
+                : hotPct <= 0 ? '' :
+                  `M ${ox1},${oy1} A ${R},${R} 0 ${hotLargeArc},1 ${ox2},${oy2} L ${ix1},${iy1} A ${r},${r} 0 ${hotLargeArc},0 ${ix2},${iy2} Z`;
+
+              return (
+                <div>
+                  <h4 className="text-base font-bold text-gray-700 mb-4">📊 Tỷ lệ đóng góp doanh thu</h4>
+                  <div className="flex flex-col md:flex-row items-center gap-8">
+                    <svg width="280" height="260" viewBox="0 0 280 260" className="flex-shrink-0">
+                      <defs>
+                        <linearGradient id="hotGrad" x1="0" y1="0" x2="1" y2="1">
+                          <stop offset="0%" stopColor="#ef4444" />
+                          <stop offset="100%" stopColor="#f97316" />
+                        </linearGradient>
+                        <filter id="donutShadow" x="-20%" y="-20%" width="140%" height="140%">
+                          <feDropShadow dx="0" dy="2" stdDeviation="4" floodColor="#ef4444" floodOpacity="0.2" />
+                        </filter>
+                      </defs>
+                      <circle cx={cx} cy={cy} r={R} fill="none" stroke="#f3f4f6" strokeWidth={R - r} />
+                      {hotPct > 0 && (
+                        <path d={hotPath} fill="url(#hotGrad)" filter="url(#donutShadow)" />
+                      )}
+                      <text x={cx} y={cy - 8} textAnchor="middle" fontSize="22" fontWeight="900" fill="#2b3674">{hotPct.toFixed(1)}%</text>
+                      <text x={cx} y={cy + 14} textAnchor="middle" fontSize="10" fill="#A3AED0">Top 5 Hot</text>
+                    </svg>
+
+                    <div className="space-y-4 flex-1">
+                      <div className="flex items-center gap-3 bg-gradient-to-r from-red-50 to-orange-50 p-4 rounded-2xl">
+                        <div className="w-4 h-4 rounded-full bg-gradient-to-r from-red-500 to-orange-500 flex-shrink-0" />
+                        <div className="flex-1">
+                          <p className="text-sm font-bold text-gray-700">Top 5 sản phẩm Hot</p>
+                          <p className="text-lg font-black text-red-600">{hotRev.toLocaleString('vi-VN')}₫</p>
+                        </div>
+                        <span className="text-sm font-black text-red-500">{hotPct.toFixed(1)}%</span>
+                      </div>
+                      <div className="flex items-center gap-3 bg-gray-50 p-4 rounded-2xl">
+                        <div className="w-4 h-4 rounded-full bg-gray-300 flex-shrink-0" />
+                        <div className="flex-1">
+                          <p className="text-sm font-bold text-gray-700">Các sản phẩm khác</p>
+                          <p className="text-lg font-black text-gray-600">{otherRev.toLocaleString('vi-VN')}₫</p>
+                        </div>
+                        <span className="text-sm font-black text-gray-400">{otherPct.toFixed(1)}%</span>
+                      </div>
+                      <div className="bg-blue-50 p-3 rounded-xl text-center">
+                        <p className="text-xs text-blue-400 font-bold">Tổng doanh thu 30 ngày</p>
+                        <p className="text-base font-black text-blue-600">{totalRev.toLocaleString('vi-VN')}₫</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* ── GROUPED BAR CHART: Đã bán vs Tồn kho vs Doanh thu ── */}
+            {(() => {
+              const products = hotData.products || [];
+              const maxVal = Math.max(
+                ...products.map(p => Math.max(
+                  Number(p.totalSold) || 0,
+                  Number(p.currentStock) || 0,
+                  (Number(p.revenue) || 0) / 1000000
+                )),
+                1
+              );
+
+              const BAR_W = 700, BAR_H = 280, B_PAD_L = 50, B_PAD_B = 80, B_PAD_T = 30, B_PAD_R = 20;
+              const plotW = BAR_W - B_PAD_L - B_PAD_R;
+              const plotH = BAR_H - B_PAD_T - B_PAD_B;
+              const groupW = plotW / products.length;
+              const barWidth = Math.min(groupW * 0.2, 25);
+              const barGap = 4;
+
+              return (
+                <div>
+                  <h4 className="text-base font-bold text-gray-700 mb-4">📦 Số lượng đã bán vs Tồn kho vs Doanh thu — Top 5 Hot</h4>
+                  <div className="flex items-center gap-6 mb-4">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-sm bg-[#058a81]" />
+                      <span className="text-xs text-gray-500 font-bold">Đã bán (30 ngày)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-sm bg-[#7c3aed]" />
+                      <span className="text-xs text-gray-500 font-bold">Tồn kho hiện tại</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-sm bg-[#eab308]" />
+                      <span className="text-xs text-gray-500 font-bold">Doanh thu (Tr. VNĐ)</span>
+                    </div>
+                  </div>
+                  <div className="w-full overflow-x-auto">
+                    <svg viewBox={`0 0 ${BAR_W} ${BAR_H}`} className="w-full min-w-[500px]" style={{ height: 300 }}>
+                      <defs>
+                        <linearGradient id="soldGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#058a81" />
+                          <stop offset="100%" stopColor="#0d9488" />
+                        </linearGradient>
+                        <linearGradient id="stockGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#7c3aed" />
+                          <stop offset="100%" stopColor="#a78bfa" />
+                        </linearGradient>
+                        <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#eab308" />
+                          <stop offset="100%" stopColor="#ca8a04" />
+                        </linearGradient>
+                      </defs>
+
+                      {/* Grid lines */}
+                      {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
+                        const y = B_PAD_T + plotH - ratio * plotH;
+                        return (
+                          <g key={i}>
+                            <line x1={B_PAD_L} y1={y} x2={BAR_W - B_PAD_R} y2={y} stroke="#f3f4f6" strokeWidth="1" />
+                            <text x={B_PAD_L - 6} y={y + 4} textAnchor="end" fontSize="10" fill="#9ca3af">
+                              {Math.round(maxVal * ratio)}
+                            </text>
+                          </g>
+                        );
+                      })}
+
+                      {/* Bars */}
+                      {products.map((p, i) => {
+                        const sold = Number(p.totalSold) || 0;
+                        const stock = Number(p.currentStock) || 0;
+                        const rev = (Number(p.revenue) || 0) / 1000000;
+                        const revDisplay = Math.round(rev);
+                        const groupX = B_PAD_L + i * groupW;
+                        const centerX = groupX + groupW / 2;
+
+                        const soldH = (sold / maxVal) * plotH;
+                        const stockH = (stock / maxVal) * plotH;
+                        const revH = (rev / maxVal) * plotH;
+
+                        const bar1X = centerX - barWidth * 1.5 - barGap;
+                        const bar2X = centerX - barWidth * 0.5;
+                        const bar3X = centerX + barWidth * 0.5 + barGap;
+                        const baseY = B_PAD_T + plotH;
+
+                        const maxChars = 12;
+                        const displayName = p.productName.length > maxChars ? p.productName.substring(0, maxChars) + '…' : p.productName;
+
+                        return (
+                          <g key={i}>
+                            <rect x={bar1X} y={baseY - soldH} width={barWidth} height={soldH} fill="url(#soldGrad)" rx="4" />
+                            <rect x={bar2X} y={baseY - stockH} width={barWidth} height={stockH} fill="url(#stockGrad)" rx="4" />
+                            <rect x={bar3X} y={baseY - revH} width={barWidth} height={revH} fill="url(#revGrad)" rx="4" />
+
+                            {sold > 0 && (
+                              <text x={bar1X + barWidth / 2} y={baseY - soldH - 6} textAnchor="middle" fontSize="10" fontWeight="bold" fill="#058a81">{sold}</text>
+                            )}
+                            {stock > 0 && (
+                              <text x={bar2X + barWidth / 2} y={baseY - stockH - 6} textAnchor="middle" fontSize="10" fontWeight="bold" fill="#7c3aed">{stock}</text>
+                            )}
+                            {revDisplay > 0 && (
+                              <text x={bar3X + barWidth / 2} y={baseY - revH - 6} textAnchor="middle" fontSize="10" fontWeight="bold" fill="#ca8a04">{revDisplay}</text>
+                            )}
+
+                            <text x={centerX} y={baseY + 16} textAnchor="middle" fontSize="9" fill="#6b7280" fontWeight="bold">
+                              {displayName}
+                            </text>
+                            <text x={centerX} y={baseY + 30} textAnchor="middle" fontSize="8" fill="#f97316" fontWeight="bold">
+                              #{i + 1}
+                            </text>
+                          </g>
+                        );
+                      })}
+
+                      <line x1={B_PAD_L} y1={B_PAD_T + plotH} x2={BAR_W - B_PAD_R} y2={B_PAD_T + plotH} stroke="#e5e7eb" strokeWidth="1" />
+                    </svg>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* ── BẢNG CHI TIẾT TOP 5 HOT ── */}
+            <div>
+              <h4 className="text-base font-bold text-gray-700 mb-4">📋 Chi tiết Top 5 sản phẩm Hot</h4>
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="text-[#A3AED0] text-xs uppercase border-b">
+                    <th className="pb-3 font-medium">#</th>
+                    <th className="pb-3 font-medium">Sản phẩm</th>
+                    <th className="pb-3 font-medium text-right">Đã bán</th>
+                    <th className="pb-3 font-medium text-right">Tồn kho</th>
+                    <th className="pb-3 font-medium text-right">Doanh thu</th>
+                  </tr>
+                </thead>
+                <tbody className="text-sm">
+                  {hotData.products.map((p, idx) => (
+                    <tr key={idx} className="border-b border-gray-50">
+                      <td className="py-4">
+                        <span className="w-8 h-8 inline-flex items-center justify-center rounded-full font-black text-sm bg-gradient-to-r from-red-100 to-orange-100 text-orange-600">
+                          {idx + 1}
+                        </span>
+                      </td>
+                      <td className="py-4">
+                        <div className="flex items-center gap-3">
+                          {p.image && <img src={p.image} alt="" className="w-10 h-10 object-contain rounded-lg bg-gray-50" />}
+                          <span className="font-bold">{p.productName}</span>
+                        </div>
+                      </td>
+                      <td className="py-4 text-right font-black text-[#058a81]">{p.totalSold} chiếc</td>
+                      <td className="py-4 text-right font-black text-[#7c3aed]">{p.currentStock}</td>
+                      <td className="py-4 text-right font-black text-red-600">{Number(p.revenue).toLocaleString('vi-VN')}₫</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
       </div>
     </div>
@@ -929,7 +1226,13 @@ const ProductDetailAdmin = ({ productId, onBack, onDeleted }) => {
   const [galleryFiles, setGalleryFiles] = useState([]);
   const [galleryPreviews, setGalleryPreviews] = useState([]);
   const [uploadingGallery, setUploadingGallery] = useState(false);
+  const [deletingGallery, setDeletingGallery] = useState({});
   const [activeTab, setActiveTab] = useState('info'); // 'info' | 'versions' | 'specs'
+  const [specsEdit, setSpecsEdit] = useState({
+    screenSize: '', screenTech: '', rearCamera: '', frontCamera: '',
+    chipset: '', ram: '', rom: '', battery: '', os: '',
+  });
+  const [savingSpecs, setSavingSpecs] = useState(false);
 
   useEffect(() => {
     loadDetail();
@@ -942,7 +1245,12 @@ const ProductDetailAdmin = ({ productId, onBack, onDeleted }) => {
       const data = await getProductDetail(productId);
       const p = data.result;
       setProduct(p);
-      setEditForm({ name: p.name || '', description: p.description || '', image: p.image || '', brandId: p.brandId || '' });
+      setEditForm({
+        name: p.name || '',
+        description: p.description || '',
+        image: p.image || '',
+        brandId: p.brandId ? String(p.brandId) : '',
+      });
       setMainImage(p.image || '');
       // Khởi tạo versionEdits từ data thực
       const initEdits = {};
@@ -950,6 +1258,19 @@ const ProductDetailAdmin = ({ productId, onBack, onDeleted }) => {
         initEdits[v.versionID] = { price: v.price || '', stock: v.stock ?? '' };
       });
       setVersionEdits(initEdits);
+      // Khởi tạo specsEdit
+      const s = p.specs || {};
+      setSpecsEdit({
+        screenSize: s.screenSize || '',
+        screenTech: s.screenTech || '',
+        rearCamera: s.rearCamera || '',
+        frontCamera: s.frontCamera || '',
+        chipset: s.chipset || '',
+        ram: s.ram || '',
+        rom: s.rom || '',
+        battery: s.battery || '',
+        os: s.os || '',
+      });
     } catch (err) { console.error('Lỗi load chi tiết SP:', err); }
     finally { setLoading(false); }
   };
@@ -969,13 +1290,40 @@ const ProductDetailAdmin = ({ productId, onBack, onDeleted }) => {
     finally { setSaving(false); }
   };
 
+  const handleSaveSpecs = async () => {
+    setSavingSpecs(true);
+    try {
+      await updateProduct(productId, { specifications: specsEdit });
+      alert('Cập nhật thông số kỹ thuật thành công! ✅');
+      loadDetail();
+    } catch (err) { alert(err.message || 'Lỗi cập nhật thông số!'); }
+    finally { setSavingSpecs(false); }
+  };
+
+  const handleRemoveCoverImage = async () => {
+    if (!confirm('Xóa ảnh đại diện hiện tại?')) return;
+    try {
+      await updateProduct(productId, { image: '' });
+      setEditForm(prev => ({ ...prev, image: '' }));
+      setMainImage('');
+      alert('Đã xóa ảnh đại diện! ✅');
+      loadDetail();
+    } catch (err) { alert(err.message || 'Lỗi xóa ảnh!'); }
+  };
+
   const handleSaveVersion = async (versionId) => {
     setSavingVersions(prev => ({ ...prev, [versionId]: true }));
     try {
       const edit = versionEdits[versionId];
+      // Truyền ĐẦY ĐỦ các field để backend không overwrite bằng null
+      const origVersion = (product?.versions || []).find(v => v.versionID === versionId);
       await updateVersion(versionId, {
         price: Number(edit.price),
         stock: Number(edit.stock),
+        colour: origVersion?.colour || '',
+        storage: origVersion?.storage || '',
+        material: origVersion?.material || '',
+        imageURL: origVersion?.imageURL || '',
       });
       alert('Cập nhật phiên bản thành công! ✅');
       loadDetail();
@@ -1011,7 +1359,19 @@ const ProductDetailAdmin = ({ productId, onBack, onDeleted }) => {
     finally { setUploadingGallery(false); }
   };
 
+  const handleDeleteGalleryImage = async (imageUrl) => {
+    if (!confirm('Xóa ảnh gallery này?')) return;
+    setDeletingGallery(prev => ({ ...prev, [imageUrl]: true }));
+    try {
+      await deleteGalleryImage(productId, imageUrl);
+      alert('Đã xóa ảnh gallery! ✅');
+      loadDetail();
+    } catch (err) { alert(err.message || 'Lỗi xóa ảnh gallery!'); }
+    finally { setDeletingGallery(prev => ({ ...prev, [imageUrl]: false })); }
+  };
+
   const formatVND = (v) => v ? Number(v).toLocaleString('vi-VN') + '₫' : '-';
+
 
   if (loading) return (
     <div className="space-y-4">{[...Array(6)].map((_, i) => <div key={i} className="h-12 bg-gray-100 rounded-2xl animate-pulse" />)}</div>
@@ -1041,15 +1401,28 @@ const ProductDetailAdmin = ({ productId, onBack, onDeleted }) => {
             <div className="bg-gray-50 rounded-2xl p-6 flex items-center justify-center min-h-[280px] border border-gray-100">
               <img src={mainImage || product.image} alt={product.name} className="max-h-[260px] object-contain" />
             </div>
-            {/* Thumbnail gallery */}
+            {/* Thumbnail gallery với nút xóa */}
             {product.imageUrls?.length > 0 && (
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                {product.imageUrls.map((url, idx) => (
-                  <div key={idx} onClick={() => setMainImage(url)}
-                    className={`shrink-0 w-14 h-14 border-2 rounded-xl p-1 cursor-pointer transition-all ${mainImage === url ? 'border-[#4318FF]' : 'border-gray-100 hover:border-gray-300'}`}>
-                    <img src={url} alt="" className="w-full h-full object-contain" />
-                  </div>
-                ))}
+              <div>
+                <label className="text-[10px] font-black text-[#A3AED0] uppercase block mb-2">Gallery hiện tại ({product.imageUrls.length} ảnh)</label>
+                <div className="flex gap-2 flex-wrap">
+                  {product.imageUrls.map((url, idx) => (
+                    <div key={idx} className="relative group">
+                      <div onClick={() => setMainImage(url)}
+                        className={`w-16 h-16 border-2 rounded-xl p-1 cursor-pointer transition-all ${mainImage === url ? 'border-[#4318FF]' : 'border-gray-100 hover:border-gray-300'}`}>
+                        <img src={url} alt="" className="w-full h-full object-contain" />
+                      </div>
+                      <button
+                        onClick={() => handleDeleteGalleryImage(url)}
+                        disabled={deletingGallery[url]}
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full text-[9px] font-black opacity-0 group-hover:opacity-100 transition cursor-pointer flex items-center justify-center shadow-md hover:bg-red-600 disabled:opacity-50"
+                        title="Xóa ảnh này"
+                      >
+                        {deletingGallery[url] ? '⏳' : '✕'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
             {/* Upload gallery */}
@@ -1116,13 +1489,29 @@ const ProductDetailAdmin = ({ productId, onBack, onDeleted }) => {
                 <div>
                   <label className="text-[10px] font-black text-[#A3AED0] uppercase block mb-1">Hãng</label>
                   <select value={editForm.brandId} onChange={(e) => setEditForm({ ...editForm, brandId: e.target.value })}
-                    className="w-full bg-[#f4f7fe] rounded-xl p-3 outline-none font-bold">
+                    className="w-full bg-[#f4f7fe] rounded-xl p-3 outline-none font-bold border border-transparent focus:border-[#4318FF]">
                     <option value="">-- Chọn hãng --</option>
-                    {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    {brands.map(b => <option key={b.id} value={String(b.id)}>{b.name}</option>)}
                   </select>
+                  {product.brandName && (
+                    <p className="text-[10px] text-gray-400 mt-1">Hãng hiện tại: <span className="font-bold text-[#4318FF]">{product.brandName}</span></p>
+                  )}
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-[#A3AED0] uppercase block mb-1">Ảnh đại diện (Upload)</label>
+                  <label className="text-[10px] font-black text-[#A3AED0] uppercase block mb-1">Ảnh đại diện</label>
+                  {/* Xem ảnh hiện tại và xóa */}
+                  {editForm.image && (
+                    <div className="flex items-center gap-3 bg-gray-50 rounded-xl p-3 border mb-2">
+                      <img src={editForm.image} alt="Ảnh đại diện" className="w-16 h-16 object-contain rounded-lg border bg-white" />
+                      <div>
+                        <p className="text-[10px] text-gray-400 mb-1">Ảnh đại diện hiện tại</p>
+                        <button onClick={handleRemoveCoverImage}
+                          className="text-[10px] bg-red-50 text-red-500 px-2 py-1 rounded-lg font-bold hover:bg-red-100 cursor-pointer transition">
+                          🗑️ Xóa ảnh này
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   <input type="file" accept="image/*" onChange={async (e) => {
                     if (e.target.files[0]) {
                       const res = await uploadImage(e.target.files[0]);
@@ -1130,7 +1519,7 @@ const ProductDetailAdmin = ({ productId, onBack, onDeleted }) => {
                       setMainImage(res.result);
                     }
                   }} className="w-full bg-[#f4f7fe] rounded-xl p-2 outline-none text-sm border" />
-                  {editForm.image && <p className="text-[10px] text-green-600 mt-1">✓ Đã cập nhật ảnh</p>}
+                  <p className="text-[10px] text-gray-400 mt-1">↑ Chọn ảnh mới để thay thế</p>
                 </div>
                 <div>
                   <label className="text-[10px] font-black text-[#A3AED0] uppercase block mb-1">Mô tả</label>
@@ -1189,33 +1578,38 @@ const ProductDetailAdmin = ({ productId, onBack, onDeleted }) => {
               </div>
             )}
 
-            {/* Tab: Thông số kỹ thuật */}
+            {/* Tab: Thông số kỹ thuật - CÓ CHỈNH SỬA */}
             {activeTab === 'specs' && (
-              <div className="bg-gray-50 rounded-2xl p-5 border border-gray-100">
-                {!specs || Object.keys(specs).length === 0 ? (
-                  <p className="text-gray-400 text-sm italic">Chưa có thông số kỹ thuật</p>
-                ) : (
-                  <table className="w-full text-sm">
-                    <tbody>
-                      {[
-                        ['Màn hình', specs.screenSize],
-                        ['Công nghệ màn hình', specs.screenTech],
-                        ['Camera sau', specs.rearCamera],
-                        ['Camera trước', specs.frontCamera],
-                        ['Chip xử lý', specs.chipset],
-                        ['RAM', specs.ram],
-                        ['ROM', specs.rom],
-                        ['Pin', specs.battery],
-                        ['Hệ điều hành', specs.os],
-                      ].map(([label, val], i, arr) => (
-                        <tr key={i} className={`${i !== arr.length - 1 ? 'border-b border-gray-200' : ''}`}>
-                          <td className="py-2.5 text-gray-400 w-2/5 text-xs font-bold uppercase">{label}</td>
-                          <td className="py-2.5 text-right font-semibold text-[#2b3674] text-sm">{val || <span className="text-gray-300 italic text-xs">Chưa cập nhật</span>}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
+              <div className="space-y-4">
+                <p className="text-xs text-gray-400 font-bold uppercase">Chỉnh sửa thông số kỹ thuật</p>
+                <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100 space-y-3">
+                  {[
+                    { key: 'screenSize', label: 'Màn hình', placeholder: 'VD: 6.9 inches' },
+                    { key: 'screenTech', label: 'Công nghệ màn hình', placeholder: 'VD: Super Retina XDR OLED' },
+                    { key: 'rearCamera', label: 'Camera sau', placeholder: 'VD: 48MP + 12MP' },
+                    { key: 'frontCamera', label: 'Camera trước', placeholder: 'VD: 12MP TrueDepth' },
+                    { key: 'chipset', label: 'Chip xử lý', placeholder: 'VD: Apple A18 Pro' },
+                    { key: 'ram', label: 'RAM', placeholder: 'VD: 12GB' },
+                    { key: 'rom', label: 'ROM', placeholder: 'VD: 256GB / 512GB' },
+                    { key: 'battery', label: 'Pin', placeholder: 'VD: 4685 mAh' },
+                    { key: 'os', label: 'Hệ điều hành', placeholder: 'VD: iOS 18' },
+                  ].map(field => (
+                    <div key={field.key} className="flex items-center gap-3">
+                      <label className="text-xs font-black text-[#A3AED0] uppercase w-36 shrink-0">{field.label}</label>
+                      <input
+                        type="text"
+                        value={specsEdit[field.key] || ''}
+                        onChange={(e) => setSpecsEdit(prev => ({ ...prev, [field.key]: e.target.value }))}
+                        placeholder={field.placeholder}
+                        className="flex-1 bg-white border border-gray-200 rounded-xl px-3 py-2 text-sm font-semibold outline-none focus:border-[#4318FF] text-[#2b3674]"
+                      />
+                    </div>
+                  ))}
+                </div>
+                <button onClick={handleSaveSpecs} disabled={savingSpecs}
+                  className="w-full bg-[#4318FF] text-white py-3 rounded-2xl font-black shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition cursor-pointer">
+                  {savingSpecs ? '⏳ Đang lưu...' : '💾 LƯU THÔNG SỐ KỸ THUẬT'}
+                </button>
               </div>
             )}
           </div>

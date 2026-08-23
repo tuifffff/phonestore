@@ -117,6 +117,21 @@ export const uploadGallery = (productId, files) => {
   }).then(res => res.json());
 };
 
+// Admin: Xóa một ảnh gallery theo URL (truyền imageUrl qua query param)
+export const deleteGalleryImage = (productId, imageUrl) => {
+  return fetchWithAuth(`/products/${productId}/gallery?imageUrl=${encodeURIComponent(imageUrl)}`, {
+    method: "DELETE",
+  });
+};
+
+// Admin: Xóa ảnh đại diện (reset về null) - dùng updateProduct với image = ''
+export const removeProductCoverImage = (productId) => {
+  return fetchWithAuth(`/products/${productId}`, {
+    method: "PUT",
+    body: JSON.stringify({ image: '' }),
+  });
+};
+
 // Generic Upload 1 Image (Dùng cho Avatar, Ảnh sản phẩm, URL, v.v...)
 export const uploadImage = (file) => {
   const token = localStorage.getItem("token");
@@ -463,3 +478,16 @@ export const getDailyRevenue = (month, year) => {
 
 export const getMyMembership = () => fetchWithAuth('/membership/my');
 export const getMembershipByUser = (userId) => fetchWithAuth(`/membership/user/${userId}`);
+
+// ============================================================
+// 10. HOT PRODUCTS API (Admin)
+// ============================================================
+
+export const getHotProductsAnalytics = () => {
+  return fetchWithAuth("/statistics/hot-products");
+};
+
+export const triggerHotUpdate = () => {
+  return fetchWithAuth("/statistics/trigger-hot-update", { method: "POST" });
+};
+

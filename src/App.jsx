@@ -615,6 +615,12 @@ function App() {
                       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
                         {products.map((p) => (
                           <div key={p.id} onClick={() => handleViewDetail(p.id)} className="bg-white rounded-xl p-3 shadow-sm relative flex flex-col justify-between cursor-pointer hover:shadow-md transition-shadow">
+                            {/* 🔥 HOT Badge */}
+                            {p.isHot && (
+                              <span className="absolute top-2 left-2 z-10 bg-gradient-to-r from-red-500 to-orange-500 text-white text-[10px] font-black px-2.5 py-1 rounded-full shadow-lg animate-pulse flex items-center gap-1">
+                                🔥 HOT
+                              </span>
+                            )}
                             <div className="py-4">
                               <img src={p.image} alt={p.name} className="w-full h-auto object-contain hover:scale-105 transition-transform" />
                             </div>
